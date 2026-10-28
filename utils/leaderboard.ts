@@ -43,24 +43,6 @@ export const FORMAT_OPTIONS: { id: AnswerFormat; label: string; shortLabel: stri
   { id: 'VOICE', label: 'Mic Only (Say Your Answer)', shortLabel: 'Mic Only' },
 ];
 
-const SEED_BENCHMARK_NAMES = [
-  'Brady_GOAT',
-  'LeStats_King',
-  'Gridiron_Guru',
-  'Diamond_Clutch',
-  'CourtVision_99',
-  'TriviaBeast_23',
-  'BlitzMaster_07',
-  'HoopScholar',
-  'PuckWizard_87',
-  'DerbyChamp',
-  'RedZone_Chief',
-  'TripleDouble',
-  'GrandSlammer',
-  'SpeedyBuzzer',
-  'StatsMaverick',
-];
-
 export function getStorageKey(
   opponent: OpponentMode,
   tier: TriviaTier,
@@ -81,103 +63,26 @@ export function setLastPlayerName(name: string): void {
 }
 
 /**
- * Generates realistic seed entries for a specific combination
- */
-export function generateSeedEntries(
-  opponent: OpponentMode,
-  tier: TriviaTier,
-  format: AnswerFormat
-): LeaderboardEntry[] {
-  // Base score modifiers according to difficulty, tier, and format
-  const tierMultiplier =
-    tier === 'EASY' ? 1.0 : tier === 'MEDIUM' ? 1.25 : tier === 'HARD' ? 1.5 : 1.8;
-  const formatMultiplier =
-    format === 'STANDARD' ? 1.0 : format === 'HARD' ? 1.2 : 1.45;
-  const oppMultiplier =
-    opponent === 'ROOKIE_AI'
-      ? 0.9
-      : opponent === 'PRO_AI'
-      ? 1.1
-      : opponent === 'ALL_STAR_AI'
-      ? 1.3
-      : opponent === 'LEGEND_AI'
-      ? 1.5
-      : 1.2;
-
-  const baseHigh = Math.round(18000 * tierMultiplier * formatMultiplier * oppMultiplier);
-
-  // Deterministic seed generation based on key strings
-  const keySum = (opponent + tier + format)
-    .split('')
-    .reduce((acc, c) => acc + c.charCodeAt(0), 0);
-
-  const entries: LeaderboardEntry[] = [];
-  const numSeeds = 7;
-
-  for (let i = 0; i < numSeeds; i++) {
-    const nameIdx = (keySum + i * 3) % SEED_BENCHMARK_NAMES.length;
-    const scoreFactor = 1 - i * 0.08 - ((keySum * (i + 1)) % 5) * 0.01;
-    const score = Math.max(2000, Math.round(baseHigh * scoreFactor / 100) * 100);
-    const accuracy = Math.min(100, Math.max(65, 96 - i * 4 - ((keySum + i) % 6)));
-    const dailyDoublesWon = Math.max(0, 3 - Math.floor(i / 2));
-    const questionsAnswered = Math.min(25, 20 + ((keySum + i) % 5));
-
-    // Realistic dates within last few days
-    const dayOffset = (i * 2 + (keySum % 5)) % 14;
-    const d = new Date(Date.now() - dayOffset * 86400000 - (i * 3600000));
-    const dateFormatted = `${d.toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-    })}`;
-
-    entries.push({
-      id: `seed_${opponent}_${tier}_${format}_${i}`,
-      playerName: SEED_BENCHMARK_NAMES[nameIdx],
-      score,
-      accuracy,
-      questionsAnswered,
-      dailyDoublesWon,
-      date: dateFormatted,
-      isLocalPlayer: false,
-    });
-  }
-
-  // Sort descending by score
-  return entries.sort((a, b) => b.score - a.score);
-}
-
-/**
- * Loads leaderboard records from localStorage or initial seeds
+ * Loads the saved scores for one combination, best first. Only real games are listed;
+ * the made-up "benchmark" entries older versions added are dropped.
  */
 export function getLeaderboard(
   opponent: OpponentMode,
   tier: TriviaTier,
   format: AnswerFormat
 ): LeaderboardEntry[] {
-  if (typeof window === 'undefined') {
-    return generateSeedEntries(opponent, tier, format);
-  }
-
-  const key = getStorageKey(opponent, tier, format);
-  const stored = localStorage.getItem(key);
-
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored) as LeaderboardEntry[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.sort((a, b) => b.score - a.score).slice(0, 10);
-      }
-    } catch (e) {
-      console.error('Failed to parse leaderboard from localStorage', e);
-    }
-  }
-
-  // If none stored yet, initialize with seed entries
-  const seeds = generateSeedEntries(opponent, tier, format);
+  if (typeof window === 'undefined') return [];
   try {
-    localStorage.setItem(key, JSON.stringify(seeds));
-  } catch (e) {}
-  return seeds.slice(0, 10);
+    const parsed = JSON.parse(localStorage.getItem(getStorageKey(opponent, tier, format)) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return (parsed as LeaderboardEntry[])
+      .filter((e) => !e.id.startsWith('seed_'))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+  } catch (e) {
+    console.error('Failed to parse leaderboard from localStorage', e);
+    return [];
+  }
 }
 
 /**
@@ -232,21 +137,17 @@ export function recordLeaderboardEntry(
 }
 
 /**
- * Clears or resets a specific leaderboard category to default seeds
+ * Clears one leaderboard combination
  */
 export function resetLeaderboardCategory(
   opponent: OpponentMode,
   tier: TriviaTier,
   format: AnswerFormat
-): LeaderboardEntry[] {
-  const seeds = generateSeedEntries(opponent, tier, format);
-  if (typeof window !== 'undefined') {
-    const key = getStorageKey(opponent, tier, format);
-    try {
-      localStorage.setItem(key, JSON.stringify(seeds));
-    } catch (e) {}
-  }
-  return seeds;
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(getStorageKey(opponent, tier, format));
+  } catch (e) {}
 }
 
 /**
