@@ -5,7 +5,8 @@ export type AIDifficulty = 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT';
 export type AnswerMode = 'STANDARD' | 'HARD' | 'EXPERT' | 'VOICE'; // 4-choice, 8-choice, Typed, Mic only
 export type RoundType = 'ROUND_1' | 'CHAMPIONSHIP' | 'FINAL_SHOWDOWN' | 'RESULTS';
 export type ContestantId = 'coach' | 'player' | 'analyst' | 'player2';
-export type DeviceRole = 'HOST' | 'CLIENT';
+// HOST runs the game, CLIENT is a friend's phone, SCREEN is the big-screen stream view (watches only).
+export type DeviceRole = 'HOST' | 'CLIENT' | 'SCREEN';
 
 // Seats a friend's phone can take. The third seat is the AI analyst ("Stats Riley")
 // unless a second friend joins online, in which case that friend plays it as P3.
@@ -31,6 +32,15 @@ export interface Contestant {
   bonusHits?: number; // Daily Doubles answered correctly
   finalAnswer?: string;
   finalCorrect?: boolean;
+  sitsOutFinal?: boolean; // no money in the bank when the Final Showdown started
+}
+
+/** The biggest single win of the match, for the recap. */
+export interface BigPlay {
+  who: ContestantId;
+  amount: number;
+  dailyDouble: boolean;
+  category: string;
 }
 
 /**

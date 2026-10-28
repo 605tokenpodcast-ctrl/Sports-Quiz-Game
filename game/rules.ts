@@ -83,16 +83,29 @@ export function aiDailyDoubleWager(accuracy: number, topClue: number, score: num
   return Math.max(5, Math.min(max, Math.round(Math.floor(bet) / 50) * 50));
 }
 
-/** The Final Showdown lets everyone bet their score, or $1,000 when they have less. */
-export const maxFinalWager = (score: number) => Math.max(1000, score);
+/** Only players with money in the bank play the Final Showdown (the TV rule); the rest sit it out. */
+export const playsFinal = (score: number) => score > 0;
+/** The Final Showdown lets a player bet up to their whole score. */
+export const maxFinalWager = (score: number) => Math.max(0, score);
 export const clampFinalWager = (wager: number, score: number) =>
   Math.max(0, Math.min(maxFinalWager(score), Math.round(Number(wager)) || 0));
 
 /** The leader protects some of the lead; everyone else goes big. */
 export function aiFinalWager(score: number, isLeader: boolean, random = Math.random()): number {
-  if (score <= 0) return 1000;
+  if (!playsFinal(score)) return 0;
   const bank = maxFinalWager(score);
   return isLeader ? Math.floor(bank * 0.65) : Math.floor(bank * (0.8 + random * 0.2));
+}
+
+// --- Reading clues aloud ---------------------------------------------------------------
+
+/**
+ * About how long the browser's voice takes to read `text`, in seconds, at a little faster
+ * than normal speech. The buzzers open after this when clues are read aloud.
+ */
+export function readingSeconds(text: string, minimum: number): number {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  return Math.min(15, Math.max(minimum, Math.round((words / 2.8 + 0.8) * 10) / 10));
 }
 
 // --- Answers ----------------------------------------------------------------------------

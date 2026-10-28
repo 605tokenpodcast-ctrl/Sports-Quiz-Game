@@ -71,6 +71,27 @@ export default function HowToPlay() {
                   Wait for the host light to turn active. Buzz with Spacebar, Enter, screen button, or mobile gamepad!
                 </p>
               </div>
+
+              <div>
+                <strong className="text-amber-300">5. Everyone Has Their Own Buzzer Sound:</strong>
+                <p className="mt-0.5 text-slate-400">
+                  P1 rings a bell, P2 honks a horn, P3 (or Stats Riley) chirps and Coach Dave blows a whistle, so listeners can tell who buzzed in.
+                </p>
+              </div>
+
+              <div>
+                <strong className="text-amber-300">6. The Final Showdown:</strong>
+                <p className="mt-0.5 text-slate-400">
+                  Everyone with money in the bank wagers up to their whole score. Players at $0 or below sit the Final out and keep their score.
+                </p>
+              </div>
+
+              <div>
+                <strong className="text-emerald-400">📺 Streaming or Recording?</strong>
+                <p className="mt-0.5 text-slate-400">
+                  Open <strong>Invite / Duel</strong> and use the <strong>Stream Screen</strong> link on a laptop or TV. It shows the board, clues and scores big, with the join QR code, while everyone plays from their phones. Turn on <strong>Read Clues Aloud</strong> for audio listeners.
+                </p>
+              </div>
             </div>
 
             <button

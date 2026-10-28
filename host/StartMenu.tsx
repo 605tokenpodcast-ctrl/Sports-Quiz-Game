@@ -1,8 +1,9 @@
 // The start screen: game settings and the button to start.
-import {Play, HelpCircle, Trophy, Users, Shield, User, Smartphone, Edit3} from 'lucide-react';
+import {Play, HelpCircle, Trophy, Users, Shield, User, Smartphone, Edit3, Megaphone} from 'lucide-react';
 import {gameAudio, MenuOverlay} from '../utils/helper';
 import {AIDifficulty, AnswerMode, RemoteSeat, seatLabel} from '../game/types';
 import {isVoiceSupported} from '../utils/VoiceAnswerButton';
+import {isSpeechSupported} from '../utils/speech';
 import {useGame} from '../game/GameContext';
 
 export default function StartMenu() {
@@ -32,6 +33,9 @@ export default function StartMenu() {
     startMatch,
     startButtonRef,
     openLeaderboardWithConfig,
+    readAloud,
+    setReadAloud,
+    screenCount,
   } = useGame();
   return (
     <>
@@ -212,6 +216,29 @@ export default function StartMenu() {
                 ))}
               </div>
             </div>
+
+            {/* Read clues aloud */}
+            {isSpeechSupported && (
+              <button
+                onClick={() => {
+                  gameAudio.playCrispClick();
+                  setReadAloud(!readAloud);
+                }}
+                className={`w-full mb-4 min-h-[44px] py-2 px-3 rounded-lg border flex items-center justify-between gap-2 text-left transition-all ${
+                  readAloud ? 'bg-blue-600 text-white border-blue-400 shadow-md' : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-blue-500'
+                }`}>
+                <span className="flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 shrink-0" />
+                  <span className="flex flex-col">
+                    <span className="text-xs font-bold">Read Clues Aloud: {readAloud ? 'On' : 'Off'}</span>
+                    <span className="text-[9px] opacity-80">
+                      {screenCount > 0 ? 'The stream screen reads each clue; ' : 'This device reads each clue; '}
+                      buzzers open when it's done
+                    </span>
+                  </span>
+                </span>
+              </button>
+            )}
 
             {/* Start Button */}
             <button

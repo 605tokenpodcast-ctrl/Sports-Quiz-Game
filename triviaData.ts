@@ -11,6 +11,7 @@ import {
   GameLength,
   generateBoardForRound,
   generateSmartDistractors,
+  getActiveCategories,
   getChampionshipFinalClues,
   getSeenQuestionsCount,
   getSeenQuestionIds,
@@ -57,6 +58,12 @@ export const FINAL_SHOWDOWN_QUESTIONS: QuestionClue[] = RAW_FINAL_SHOWDOWN_QUEST
 }));
 
 /**
+ * Every board gets one current column, so each episode has fresh talking points after the
+ * Tuesday question refresh: this week's games in Round 1, the season so far in Round 2.
+ */
+export const CURRENT_CATEGORY_IDS = {ROUND_1: 'nfl_this_week', ROUND_2: 'nfl_this_season'} as const;
+
+/**
  * Dynamic getter for category boards with strict session-wide deduplication:
  * 1. usedCategoryIds
  * 2. usedQuestionIds
@@ -78,7 +85,8 @@ export function getCategoriesForRound(
     usedCategoryIds,
     usedQuestionIds,
     usedAnswers,
-    gameLength
+    gameLength,
+    CURRENT_CATEGORY_IDS[round]
   );
 }
 
@@ -153,6 +161,12 @@ export function createFullGameSession(
 
   const categoryCount = BOARD_LAYOUTS[gameLength].categories;
 
+  // Round 2's current column (the season so far) is small, so Round 1 leaves its answers alone.
+  const reserved = (getActiveCategories().find((c) => c.id === CURRENT_CATEGORY_IDS.ROUND_2)?.clues ?? [])
+    .map((q) => normalizeAnswer(q.correctAnswer))
+    .filter((a) => !usedAnswers.has(a));
+  reserved.forEach((a) => usedAnswers.add(a));
+
   // Round 1
   const round1Board = getCategoriesForRound(
     'ROUND_1',
@@ -163,6 +177,8 @@ export function createFullGameSession(
     usedAnswers,
     gameLength
   );
+
+  reserved.forEach((a) => usedAnswers.delete(a));
 
   // Round 2 (DIFFERENT categories from Round 1)
   const round2Board = getCategoriesForRound(

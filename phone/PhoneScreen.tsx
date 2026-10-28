@@ -1,6 +1,6 @@
 // A friend's phone: their buzzer, answers and wagers, kept in step with the host.
 import React from 'react';
-import {Trophy, Zap, Clock, Flame, Star, Smartphone, Wifi, Gamepad2, ArrowLeft, Lock} from 'lucide-react';
+import {Trophy, Zap, Clock, Flame, Star, Smartphone, Wifi, Gamepad2, ArrowLeft, Lock, Share2} from 'lucide-react';
 import TimeLeft from '../utils/TimeLeft';
 import {ContestantId, isOpenAnswerMode, seatLabel} from '../game/types';
 import {maxDailyDoubleWager, maxFinalWager} from '../game/rules';
@@ -44,6 +44,7 @@ export default function PhoneScreen() {
     answerByVoice,
     finalAnswerByVoice,
     activeContestantsList,
+    shareRecap,
   } = useGame();
     const isPlayer2Selector = activeSelector === mySeat;
     const isPlayer2Buzzed = activeClue?.buzzedContestantId === mySeat;
@@ -388,6 +389,7 @@ export default function PhoneScreen() {
             const maxWager = maxFinalWager(contestants[mySeat].score);
             const wagerLocked = Boolean(finalLocks.wager[mySeat]);
             const answerLocked = Boolean(finalLocks.answer[mySeat]);
+            const sitOut = Boolean(contestants[mySeat].sitsOutFinal);
             const sendAnswer = (answer: string, lockIn = false) =>
               p2pRef.current?.send({type: 'CLIENT_FINAL_ANSWER', contestantId: mySeat, answer, lockIn});
             return (
@@ -398,7 +400,15 @@ export default function PhoneScreen() {
                 CATEGORY: <strong className="text-white">{finalClue?.category}</strong>
               </div>
 
-              {finalShowdownPhase === 'WAGER' && (
+              {sitOut && finalShowdownPhase !== 'RESULTS' && (
+                <div className="text-xs font-bold text-slate-300">
+                  {activeContestantsList.every((id) => contestants[id].sitsOutFinal)
+                    ? 'Nobody has money in the bank, so there is no Final Showdown this time. The scores stand.'
+                    : 'You have no money in the bank, so you sit out the Final Showdown. Your score stands. Watch the others!'}
+                </div>
+              )}
+
+              {finalShowdownPhase === 'WAGER' && !sitOut && (
                 <div className="w-full flex flex-col gap-2">
                   {wagerLocked ? (
                     <div className="text-sm font-black text-emerald-400">
@@ -441,7 +451,7 @@ export default function PhoneScreen() {
                   <div className="p-3 bg-slate-950 rounded-lg text-xs font-medium text-slate-200 border border-blue-800">
                     {finalClue?.clue}
                   </div>
-                  {answerLocked ? (
+                  {sitOut ? null : answerLocked ? (
                     <div className="text-sm font-black text-emerald-400">
                       Answer locked: "{finalPlayer2Input || '(no answer)'}". Waiting for the others...
                     </div>
@@ -506,6 +516,12 @@ export default function PhoneScreen() {
                     </div>
                   ))}
               </div>
+              <button
+                onClick={shareRecap}
+                className="w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 font-black rounded-xl text-sm shadow-lg active:scale-95 flex items-center justify-center gap-1.5">
+                <Share2 className="w-4 h-4" />
+                <span>SHARE RECAP CARD</span>
+              </button>
               <div className="text-xs text-slate-400">Waiting for Host to start rematch...</div>
             </div>
           )}

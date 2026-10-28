@@ -1,5 +1,5 @@
 // The end of game results.
-import {RotateCw, Trophy, Edit3} from 'lucide-react';
+import {RotateCw, Trophy, Edit3, Share2} from 'lucide-react';
 import {MenuOverlay} from '../utils/helper';
 import {AnswerFormat, TriviaTier} from '../utils/leaderboard';
 import {IMG_TROPHY} from '../ui/shared';
@@ -19,6 +19,8 @@ export default function ResultsOverlay() {
     startMatch,
     activeContestantsList,
     openLeaderboardWithConfig,
+    recapMomentsList,
+    shareRecap,
   } = useGame();
   return (
     <>
@@ -94,6 +96,16 @@ export default function ResultsOverlay() {
               </div>
             </div>
 
+            {/* Best moments, also on the recap card */}
+            {recapMomentsList.length > 0 && (
+              <div className="w-full bg-slate-950/90 border border-blue-800 rounded-xl p-2.5 mb-2.5 text-left">
+                <div className="text-[10px] font-bold text-amber-300 uppercase tracking-wider mb-1 text-center">Best Moments</div>
+                {recapMomentsList.map((m) => (
+                  <div key={m} className="text-[11px] text-slate-200 leading-snug">• {m}</div>
+                ))}
+              </div>
+            )}
+
             {/* Match Career Stats */}
             <div className="w-full grid grid-cols-3 gap-1.5 mb-3 text-center">
               <div className="bg-slate-950 p-1.5 rounded-lg border border-slate-800">
@@ -120,6 +132,13 @@ export default function ResultsOverlay() {
 
             {/* Buttons: Leaderboard, Rematch, Edit Tag */}
             <div className="w-full flex flex-col gap-2">
+              <button
+                onClick={shareRecap}
+                className="min-w-[48px] min-h-[44px] w-full py-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-slate-950 font-black text-xs sm:text-sm shadow-md transition-transform active:scale-95 flex items-center justify-center gap-2">
+                <Share2 className="w-4 h-4" />
+                <span>SHARE RECAP CARD</span>
+              </button>
+
               <button
                 onClick={() => openLeaderboardWithConfig(currentOpponentMode, difficulty as TriviaTier, answerMode as AnswerFormat)}
                 className="min-w-[48px] min-h-[44px] w-full py-2.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs sm:text-sm shadow-md transition-transform active:scale-95 flex items-center justify-center gap-2">

@@ -5,6 +5,8 @@ import {
   aiFinalWager,
   clampDailyDoubleWager,
   clampFinalWager,
+  playsFinal,
+  readingSeconds,
   clueTimeUp,
   countdownForSync,
   countdownFromSync,
@@ -138,10 +140,21 @@ check('wagers stay inside the limits', () => {
   assert.equal(clampDailyDoubleWager(5000, 1000, 6000), 5000);
   assert.equal(clampDailyDoubleWager(-50, 1000, 0), 5);
   assert.equal(clampFinalWager(99_999, 2500), 2500);
-  assert.equal(clampFinalWager(99_999, -400), 1000);
+  assert.equal(clampFinalWager(99_999, -400), 0);
+  assert.equal(clampFinalWager(500, 0), 0);
   assert.equal(clampFinalWager(-5, 2500), 0);
   assert.equal(aiFinalWager(10_000, true), 6500);
-  assert.equal(aiFinalWager(-100, false), 1000);
+  assert.equal(aiFinalWager(-100, false), 0);
+  assert.equal(aiFinalWager(0, true), 0);
+  assert.ok(playsFinal(200) && !playsFinal(0) && !playsFinal(-600), 'only players with money play the Final');
+});
+
+check('reading a clue aloud holds the buzzers until it is read', () => {
+  assert.equal(readingSeconds('Who won?', 3.6), 3.6);
+  const clue = 'Who had the most receiving yards of any player in Week 6 of the 2026 season (165)?';
+  const secs = readingSeconds(clue, 3.6);
+  assert.ok(secs > 5 && secs < 8, `about 6 seconds for a 17-word clue, got ${secs}`);
+  assert.equal(readingSeconds('word '.repeat(200), 3.6), 15);
 });
 
 if (failed) process.exit(1);

@@ -1,7 +1,8 @@
 // The in-game menu.
-import {Play, RotateCw, Volume2, VolumeX, Trophy, Shield, RefreshCw, Edit3} from 'lucide-react';
+import {Play, RotateCw, Volume2, VolumeX, Trophy, Shield, RefreshCw, Edit3, Megaphone} from 'lucide-react';
 import {gameAudio, MenuOverlay} from '../utils/helper';
 import {useGame} from '../game/GameContext';
+import {isSpeechSupported} from '../utils/speech';
 
 export default function GameMenu() {
   const {
@@ -19,6 +20,8 @@ export default function GameMenu() {
     handleResetQuestionHistory,
     startMatch,
     openLeaderboardWithConfig,
+    readAloud,
+    setReadAloud,
   } = useGame();
   return (
     <>
@@ -84,6 +87,15 @@ export default function GameMenu() {
                   <span>Music: {musicMuted ? 'Off' : 'On'}</span>
                 </button>
               </div>
+
+              {isSpeechSupported && (
+                <button
+                  onClick={() => setReadAloud(!readAloud)}
+                  className="min-w-[44px] min-h-[44px] w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-xs font-bold flex items-center justify-center gap-2 transition-colors">
+                  <Megaphone className={`w-4 h-4 ${readAloud ? 'text-emerald-400' : 'text-rose-400'}`} />
+                  <span>Read Clues Aloud: {readAloud ? 'On' : 'Off'}</span>
+                </button>
+              )}
 
               {/* Leaderboards Trigger */}
               <button

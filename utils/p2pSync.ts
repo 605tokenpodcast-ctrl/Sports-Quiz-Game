@@ -8,6 +8,7 @@ import Peer, {DataConnection} from 'peerjs';
 export type P2PMessage =
   | { type: 'STATE_SYNC'; payload: any }
   | { type: 'CLIENT_JOIN'; playerName?: string }
+  | { type: 'SCREEN_JOIN' } // a big-screen stream view that only watches
   | { type: 'CLIENT_BUZZ'; contestantId: string; timestamp: number }
   | { type: 'CLIENT_ANSWER'; contestantId: string; answer: string; alternatives?: string[] }
   | { type: 'CLIENT_SELECT_CLUE'; contestantId: string; catIdx: number; clueIdx: number }
@@ -53,6 +54,7 @@ export class P2PConnectionManager {
   private isHost = false;
   private roomCode = '';
   private playerName: string;
+  private joinAs: 'player' | 'screen';
   private callbacks: P2PCallbacks;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private isDestroyed = false;
@@ -62,11 +64,18 @@ export class P2PConnectionManager {
   // closing its connection, so the host drops peers that go quiet.
   private lastHeard = new Map<string, number>();
 
-  constructor(roomCode: string, role: 'host' | 'client', callbacks: P2PCallbacks, playerName = 'Friend') {
+  constructor(
+    roomCode: string,
+    role: 'host' | 'client',
+    callbacks: P2PCallbacks,
+    playerName = 'Friend',
+    joinAs: 'player' | 'screen' = 'player'
+  ) {
     this.roomCode = roomCode.toUpperCase().trim();
     this.isHost = role === 'host';
     this.callbacks = callbacks;
     this.playerName = playerName;
+    this.joinAs = joinAs;
     this.initPeer();
   }
 
@@ -159,7 +168,7 @@ export class P2PConnectionManager {
     conn.on('open', () => {
       this.setupDataConnection(conn);
       this.callbacks.onStatus('connected', 'Connected to the host!');
-      this.send({ type: 'CLIENT_JOIN', playerName: this.playerName });
+      this.send(this.joinAs === 'screen' ? { type: 'SCREEN_JOIN' } : { type: 'CLIENT_JOIN', playerName: this.playerName });
     });
 
     conn.on('error', (err: any) => {
