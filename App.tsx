@@ -105,6 +105,8 @@ export type AnswerMode = 'STANDARD' | 'HARD' | 'EXPERT' | 'VOICE'; // 4-choice, 
 
 // Typed and mic-only modes show no options and check the answer with fuzzy matching.
 const isOpenAnswerMode = (mode: AnswerMode) => mode === 'EXPERT' || mode === 'VOICE';
+// What a phone gets of a question before the reveal: the clue without its answer.
+const hideAnswer = (clue: QuestionClue): QuestionClue => ({...clue, correctAnswer: '', aliases: [], distractors: []});
 export type RoundType = 'ROUND_1' | 'CHAMPIONSHIP' | 'FINAL_SHOWDOWN' | 'RESULTS';
 export type ContestantId = 'coach' | 'player' | 'analyst' | 'player2';
 
@@ -125,6 +127,7 @@ interface Contestant {
   correctCount: number;
   wrongCount: number;
   wager: number;
+  bonusHits?: number; // Daily Doubles answered correctly
   finalAnswer?: string;
   finalCorrect?: boolean;
 }
@@ -209,6 +212,41 @@ function QRCodeView({ value, size = 180 }: { value: string; size?: number }) {
           )
         )}
       </svg>
+    </div>
+  );
+}
+
+/** Final Showdown multiple choice: the same options for every player, the right answer always among them. */
+function FinalChoices({
+  options,
+  value,
+  onPick,
+  disabled = false,
+}: {
+  options: string[];
+  value: string;
+  onPick: (option: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className={`w-full grid gap-2 ${options.length > 4 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
+      {options.map((opt, idx) => (
+        <button
+          key={opt}
+          type="button"
+          disabled={disabled}
+          onClick={() => onPick(opt)}
+          className={`min-h-[44px] p-2 rounded-xl border-2 font-bold text-xs sm:text-sm text-left flex items-center gap-2 transition-all active:scale-95 disabled:opacity-60 ${
+            value === opt
+              ? 'bg-amber-400 text-slate-950 border-white'
+              : 'bg-blue-950 text-slate-100 border-blue-600 hover:border-amber-400'
+          }`}>
+          <span className="w-6 h-6 rounded-lg bg-slate-950/40 border border-amber-400/80 font-black text-xs flex items-center justify-center shrink-0">
+            {String.fromCharCode(65 + idx)}
+          </span>
+          <span className="line-clamp-2 flex-1">{opt}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -382,6 +420,8 @@ export default function App() {
   const [finalPlayer2Input, setFinalPlayer2Input] = useState('');
   const [player3FinalWager, setPlayer3FinalWager] = useState(1000);
   const [finalPlayer3Input, setFinalPlayer3Input] = useState('');
+  // Multiple choice games get choices in the Final too (empty for typed and mic-only games).
+  const [finalOptions, setFinalOptions] = useState<string[]>([]);
 
   // Match statistics for post-game
   const [matchStats, setMatchStats] = useState({
@@ -400,6 +440,13 @@ export default function App() {
   // host's state sync replaces activeClue several times a second.
   const [clientTypedInput, setClientTypedInput] = useState('');
   useEffect(() => setClientTypedInput(''), [activeClue?.clue.id, activeClue?.buzzedContestantId]);
+  // Client: the Daily Double wager being typed on this phone (as text, so the box can be cleared).
+  const [clientWager, setClientWager] = useState('');
+  useEffect(() => {
+    if (activeClue?.isBonusWager) setClientWager(String(activeClue.bonusWagerInput));
+    // Only when a new Daily Double opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeClue?.clue.id, activeClue?.isBonusWager]);
 
   // P2P Manager Ref
   const p2pRef = useRef<P2PConnectionManager | null>(null);
@@ -409,7 +456,36 @@ export default function App() {
   const remoteSeatsRef = useRef(remoteSeats);
   const [mySeat, setMySeat] = useState<RemoteSeat>('player2');
   const player3Human = Object.values(remoteSeats).includes('analyst');
+  const onlineRemoteSeats = Object.values(remoteSeats);
   const isHumanSeat = (id: ContestantId) => id === 'player' || id === 'player2' || (id === 'analyst' && player3Human);
+
+  // Host: seats whose phone dropped during a match, with that player's name, so they can rejoin
+  // into the same seat and score. Stats Riley covers an away Player 3; an away Player 2 sits out.
+  const [awaySeats, setAwaySeats] = useState<Partial<Record<RemoteSeat, string>>>({});
+  const awaySeatsRef = useRef(awaySeats);
+  const player2Away = awaySeats.player2 !== undefined;
+
+  // Seats that take part in buzzer races right now.
+  const buzzerSeats = useMemo<ContestantId[]>(
+    () =>
+      isTwoPlayerMode || isClientConnected
+        ? (['player', 'player2', 'analyst'] as ContestantId[]).filter((id) => !(id === 'player2' && player2Away))
+        : ['player', 'coach', 'analyst'],
+    [isTwoPlayerMode, isClientConnected, player2Away]
+  );
+
+  // Final Showdown: which players have locked their wager and their answer.
+  type FinalLocks = {wager: Partial<Record<ContestantId, boolean>>; answer: Partial<Record<ContestantId, boolean>>};
+  const NO_FINAL_LOCKS: FinalLocks = {wager: {}, answer: {}};
+  const [finalLocks, setFinalLocks] = useState<FinalLocks>(NO_FINAL_LOCKS);
+
+  // Latest values for timers and network callbacks that outlive a render.
+  const activeClueRef = useRef(activeClue);
+  activeClueRef.current = activeClue;
+  const contestantsRef = useRef(contestants);
+  contestantsRef.current = contestants;
+  const gameStatusRef = useRef(gameState.status);
+  gameStatusRef.current = gameState.status;
   const playerNameRef = useRef(playerName);
   playerNameRef.current = playerName;
 
@@ -560,13 +636,14 @@ export default function App() {
 
   // Turn what a player said into an answer. Multiple choice picks the option they named;
   // typed mode submits the recognizer's best guess. Returns a hint when it can't tell.
-  const answerByVoice = (heard: string[], submit: (answer: string) => void): string | void => {
+  // A phone doesn't know the answer, so it passes every guess along and the host picks.
+  const answerByVoice = (heard: string[], submit: (answer: string, guesses?: string[]) => void): string | void => {
     if (!activeClue) return;
     if (isOpenAnswerMode(answerMode)) {
       const answer = pickSpokenTypedAnswer(heard, activeClue.clue, getConfig('fuzzyMatchThreshold') as number);
       if (!answer) return answerMode === 'VOICE' ? "Didn't catch that. Tap the mic and try again." : "Didn't catch that. Try again or type it.";
       setActiveClue((prev) => (prev ? {...prev, typedInput: answer} : null));
-      submit(answer);
+      submit(answer, heard);
       return;
     }
     const match = matchSpokenOption(heard, activeClue.options);
@@ -577,6 +654,12 @@ export default function App() {
   // Final Showdown answers are typed, so voice fills the box and the player checks it before submitting.
   const finalAnswerByVoice = (heard: string[], setAnswer: (answer: string) => void): string | void => {
     if (!finalClue) return;
+    if (finalOptions.length) {
+      const match = matchSpokenOption(heard, finalOptions);
+      if (!match) return `Heard "${heard[0]}". Not sure which one you meant, so tap it.`;
+      setAnswer(match);
+      return;
+    }
     const answer = pickSpokenTypedAnswer(heard, finalClue, getConfig('fuzzyMatchThreshold') as number);
     if (!answer) return "Didn't catch that. Try again or type it.";
     setAnswer(answer);
@@ -764,6 +847,10 @@ export default function App() {
     setPlayer2FinalWager(1000);
     setFinalPlayer3Input('');
     setPlayer3FinalWager(1000);
+    setFinalOptions([]);
+    setFinalLocks(NO_FINAL_LOCKS);
+    awaySeatsRef.current = {};
+    setAwaySeats({});
     setGameState((prev) => ({...prev, status: 'PLAYING', score: 0, level: 1}));
     setIsGameMenuOpen(false);
     setIsHowToPlayOpen(false);
@@ -772,61 +859,113 @@ export default function App() {
     setIsTagEditorOpen(false);
   }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human]);
 
-  // Host handling of Player Buzz Action (Player 1 or Player 2)
-  const handleContestantBuzz = useCallback(
-    (contestantId: 'player' | RemoteSeat) => {
-      if (!activeClue) return;
+  // Buzzer races. With friends on phones, buzzes are collected for a moment and the earliest
+  // press wins, counting each phone's network delay, so the host's own phone has no head start.
+  const BUZZ_WINDOW_MS = 250;
+  const pendingBuzzesRef = useRef<{id: ContestantId; at: number; clueId: string}[]>([]);
+  const buzzWindowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-      // Early buzz penalty during READING phase
-      if (activeClue.phase === 'READING') {
-        gameAudio.playErrorBuzz();
-        setEarlyBuzzFlash(true);
-        setTimeout(() => setEarlyBuzzFlash(false), 500);
-        return;
-      }
+  const awardBuzz = (contestantId: ContestantId, clueId: string) => {
+    const current = activeClueRef.current;
+    if (
+      !current ||
+      current.clue.id !== clueId ||
+      current.phase !== 'BUZZER_OPEN' ||
+      current.buzzedContestantId ||
+      current.buzzerLockout[contestantId]
+    ) {
+      return;
+    }
+    const isAI = contestantId === 'coach' || (contestantId === 'analyst' && !player3Human);
+    const name = contestantsRef.current[contestantId]?.name || 'Player';
+    // AI answers quickly; mic-only answers get a little longer, so a missed word can be said again.
+    const seconds = isAI ? 3.5 : answerMode === 'VOICE' ? 10.0 : 8.0;
 
-      if (activeClue.phase !== 'BUZZER_OPEN' || activeClue.buzzerLockout[contestantId]) return;
-
+    if (isAI) {
+      gameAudio.playHoverMicroTone();
+    } else {
       gameAudio.playConfirmSelect();
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate(60);
-      }
+      if (contestantId === 'player' && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(60);
+    }
+    if (contestantId === 'player') {
+      setMatchStats((ms) => ({...ms, buzzerWins: ms.buzzerWins + 1}));
+    }
+    setContestants((c) => ({...c, [contestantId]: {...c[contestantId], reaction: 'buzzing'}}));
 
-      if (contestantId === 'player') {
-        setMatchStats((ms) => ({...ms, buzzerWins: ms.buzzerWins + 1}));
-      }
+    setActiveClue((prev) => {
+      if (!prev || prev.clue.id !== clueId || prev.phase !== 'BUZZER_OPEN' || prev.buzzedContestantId) return prev;
+      return {
+        ...prev,
+        phase: 'ANSWERING',
+        buzzedContestantId: contestantId,
+        timer: seconds,
+        maxTimer: seconds,
+        feedbackText: isAI
+          ? `${name} buzzed in!`
+          : answerMode === 'VOICE'
+          ? `${name}'s Turn! Say your answer!`
+          : `${name}'s Turn! Select or type your answer!`,
+      };
+    });
+  };
+  const awardBuzzRef = useRef(awardBuzz);
+  awardBuzzRef.current = awardBuzz;
 
-      setContestants((c) => ({
-        ...c,
-        [contestantId]: {...c[contestantId], reaction: 'buzzing'},
-      }));
+  /** Any contestant buzzing in, human or AI. `pressedAt` is when they pressed, on the host's clock. */
+  const registerBuzz = (contestantId: ContestantId, pressedAt: number) => {
+    const current = activeClueRef.current;
+    if (!current || current.phase !== 'BUZZER_OPEN' || current.buzzedContestantId || current.buzzerLockout[contestantId]) return;
+    const clueId = current.clue.id;
 
-      setActiveClue((prev) => {
-        if (!prev || prev.phase !== 'BUZZER_OPEN') return prev;
-        const name = contestants[contestantId]?.name || 'Player';
-        return {
-          ...prev,
-          phase: 'ANSWERING',
-          buzzedContestantId: contestantId,
-          // Mic-only answers get a little longer, so a missed word can be said again.
-          timer: answerMode === 'VOICE' ? 10.0 : 8.0,
-          maxTimer: answerMode === 'VOICE' ? 10.0 : 8.0,
-          feedbackText:
-            answerMode === 'VOICE' ? `${name}'s Turn! Say your answer!` : `${name}'s Turn! Select or type your answer!`,
-        };
-      });
-    },
-    [activeClue, contestants, answerMode]
-  );
+    // Everyone on this device: first come, first served.
+    if (Object.keys(remoteSeatsRef.current).length === 0) {
+      awardBuzz(contestantId, clueId);
+      return;
+    }
+
+    const pending = pendingBuzzesRef.current;
+    if (pending.some((b) => b.id === contestantId)) return;
+    pending.push({id: contestantId, at: pressedAt, clueId});
+    if (buzzWindowRef.current) return;
+    buzzWindowRef.current = setTimeout(() => {
+      buzzWindowRef.current = null;
+      const entries = pendingBuzzesRef.current.filter((b) => b.clueId === clueId);
+      pendingBuzzesRef.current = [];
+      if (!entries.length) return;
+      const first = entries.reduce((a, b) => (b.at < a.at ? b : a));
+      awardBuzzRef.current(first.id, first.clueId);
+    }, BUZZ_WINDOW_MS);
+  };
+  const registerBuzzRef = useRef(registerBuzz);
+  registerBuzzRef.current = registerBuzz;
+
+  // Host handling of a human buzz (Player 1 here, or a friend's phone)
+  const handleContestantBuzz = (contestantId: 'player' | RemoteSeat, pressedAt = Date.now()) => {
+    if (!activeClue) return;
+
+    // Early buzz penalty during READING phase
+    if (activeClue.phase === 'READING') {
+      gameAudio.playErrorBuzz();
+      setEarlyBuzzFlash(true);
+      setTimeout(() => setEarlyBuzzFlash(false), 500);
+      return;
+    }
+
+    registerBuzz(contestantId, pressedAt);
+  };
 
   // Host handling contestant answer submission
   const handleContestantSubmitAnswer = useCallback(
-    (answer: string, answeringId: 'player' | RemoteSeat) => {
+    (answer: string, answeringId: 'player' | RemoteSeat, spokenGuesses?: string[]) => {
       if (!activeClue || activeClue.phase !== 'ANSWERING' || activeClue.buzzedContestantId !== answeringId) return;
 
       const isBonus = activeClue.isBonusWager;
       const wagerAmount = isBonus ? activeClue.bonusWagerInput : activeClue.clue.value;
       const threshold = getConfig('fuzzyMatchThreshold') as number;
+      // Phones don't get the answer, so they send all the recognizer's guesses and the host picks.
+      if (spokenGuesses?.length && isOpenAnswerMode(answerMode)) {
+        answer = pickSpokenTypedAnswer(spokenGuesses, activeClue.clue, threshold) || answer;
+      }
 
       const isCorrect =
         isOpenAnswerMode(answerMode)
@@ -849,6 +988,7 @@ export default function App() {
             score: c[answeringId].score + wagerAmount,
             reaction: 'correct',
             correctCount: c[answeringId].correctCount + 1,
+            bonusHits: (c[answeringId].bonusHits || 0) + (isBonus ? 1 : 0),
           },
         }));
 
@@ -890,8 +1030,7 @@ export default function App() {
         }
 
         const newLockouts = {...activeClue.buzzerLockout, [answeringId]: true};
-        const activeList: ContestantId[] = isTwoPlayerMode || isClientConnected ? ['player', 'player2', 'analyst'] : ['player', 'coach', 'analyst'];
-        const allLocked = activeList.every((id) => newLockouts[id]);
+        const allLocked = buzzerSeats.every((id) => newLockouts[id]);
 
         if (isBonus || allLocked) {
           setActiveClue((prev) => {
@@ -919,7 +1058,7 @@ export default function App() {
         }
       }
     },
-    [activeClue, answerMode, contestants, isTwoPlayerMode, isClientConnected]
+    [activeClue, answerMode, contestants, buzzerSeats]
   );
 
   // P2P Message Dispatcher for Host & Client
@@ -928,10 +1067,31 @@ export default function App() {
       // 1. Host receives events from friends' phones
       if (deviceRole === 'HOST') {
         if (msg.type === 'CLIENT_JOIN') {
-          const seats = remoteSeatsRef.current;
+          let seats = remoteSeatsRef.current;
           if (seats[fromPeerId]) return;
+          // A phone that reloaded comes back before its old connection is noticed as gone:
+          // same name as a seated player means it replaces that connection.
+          const stalePeer = Object.keys(seats).find(
+            (peerId) => msg.playerName && contestantsRef.current[seats[peerId]].name === msg.playerName
+          );
+          if (stalePeer) {
+            const staleSeat = seats[stalePeer];
+            seats = {...seats};
+            delete seats[stalePeer];
+            remoteSeatsRef.current = seats;
+            const nextAway = {...awaySeatsRef.current, [staleSeat]: msg.playerName};
+            awaySeatsRef.current = nextAway;
+            p2pRef.current?.disconnectPeer(stalePeer);
+          }
           const taken = new Set(Object.values(seats));
-          const seat = REMOTE_SEATS.find((s) => !taken.has(s));
+          const away = awaySeatsRef.current;
+          const awayList = (Object.keys(away) as RemoteSeat[]).filter((s) => !taken.has(s));
+          // A dropped friend gets their own seat back (matched by name), a new friend gets an
+          // empty seat, and an unnamed phone fills an away seat when nothing else is left.
+          const seat =
+            awayList.find((s) => msg.playerName && away[s] === msg.playerName) ||
+            REMOTE_SEATS.find((s) => !taken.has(s) && away[s] === undefined) ||
+            awayList[0];
           if (!seat) {
             showToast('The room is full (3 players max).');
             p2pRef.current?.send({type: 'ROOM_FULL'}, fromPeerId);
@@ -944,8 +1104,15 @@ export default function App() {
           setIsClientConnected(true);
           setIsTwoPlayerMode(true);
           const label = seatLabel(seat);
-          const name = msg.playerName || `Friend (${label})`;
-          showToast(`🎉 ${name} joined on their phone as ${label}!`);
+          const rejoined = away[seat] !== undefined;
+          const name = msg.playerName || away[seat] || `Friend (${label})`;
+          if (rejoined) {
+            const nextAway = {...away};
+            delete nextAway[seat];
+            awaySeatsRef.current = nextAway;
+            setAwaySeats(nextAway);
+          }
+          showToast(rejoined ? `${name} is back as ${label}!` : `🎉 ${name} joined on their phone as ${label}!`);
           gameAudio.playConfirmSelect();
           setContestants((prev) => ({
             ...prev,
@@ -960,11 +1127,11 @@ export default function App() {
 
         switch (msg.type) {
           case 'CLIENT_BUZZ':
-            handleContestantBuzz(seat);
+            handleContestantBuzz(seat, Date.now() - (p2pRef.current?.oneWayDelayMs(fromPeerId) ?? 0));
             break;
 
           case 'CLIENT_ANSWER':
-            handleContestantSubmitAnswer(msg.answer, seat);
+            handleContestantSubmitAnswer(msg.answer, seat, msg.alternatives);
             break;
 
           case 'CLIENT_SELECT_CLUE':
@@ -996,16 +1163,20 @@ export default function App() {
             break;
 
           case 'CLIENT_FINAL_WAGER': {
+            if (finalShowdownPhase !== 'WAGER' || finalLocks.wager[seat]) break;
             const maxWager = Math.max(1000, contestants[seat]?.score || 0);
             const wager = Math.max(0, Math.min(maxWager, Math.round(Number(msg.wager)) || 0));
             if (seat === 'player2') setPlayer2FinalWager(wager);
             else setPlayer3FinalWager(wager);
+            if (msg.lockIn) setFinalLocks((l) => ({...l, wager: {...l.wager, [seat]: true}}));
             break;
           }
 
           case 'CLIENT_FINAL_ANSWER':
+            if (finalShowdownPhase !== 'CLUE' || finalLocks.answer[seat]) break;
             if (seat === 'player2') setFinalPlayer2Input(msg.answer);
             else setFinalPlayer3Input(msg.answer);
+            if (msg.lockIn) setFinalLocks((l) => ({...l, answer: {...l.answer, [seat]: true}}));
             break;
 
           default:
@@ -1041,10 +1212,12 @@ export default function App() {
           if (s.finalClue) setFinalClue(s.finalClue);
           if (s.finalShowdownPhase) setFinalShowdownPhase(s.finalShowdownPhase);
           if (s.finalShowdownTimer !== undefined) setFinalShowdownTimer(s.finalShowdownTimer);
+          if (s.finalLocks) setFinalLocks(s.finalLocks);
+          if (s.finalOptions) setFinalOptions(s.finalOptions);
         }
       }
     },
-    [deviceRole, handleContestantBuzz, handleContestantSubmitAnswer, activeSelector, selectClue, showToast, contestants, currentRound]
+    [deviceRole, handleContestantBuzz, handleContestantSubmitAnswer, activeSelector, selectClue, showToast, contestants, currentRound, finalShowdownPhase, finalLocks]
   );
 
   // The connection lives as long as the room. It reads the latest handler through a ref
@@ -1071,7 +1244,8 @@ export default function App() {
           if (detail) setP2PDetail(detail);
           if (status === 'connected' && role === 'client') {
             setIsClientConnected(true);
-          } else if (status === 'disconnected') {
+          } else if (status === 'disconnected' && (role === 'client' || gameStatusRef.current !== 'PLAYING')) {
+            // A host mid-match keeps its lineup so friends can rejoin their seats.
             setIsClientConnected(false);
           }
         },
@@ -1082,7 +1256,14 @@ export default function App() {
           delete seats[peerId];
           remoteSeatsRef.current = seats;
           setRemoteSeats(seats);
-          showToast(`${seatLabel(seat)} disconnected.`);
+          if (gameStatusRef.current === 'PLAYING') {
+            const nextAway = {...awaySeatsRef.current, [seat]: contestantsRef.current[seat].name};
+            awaySeatsRef.current = nextAway;
+            setAwaySeats(nextAway);
+            showToast(`${seatLabel(seat)} disconnected. They can rejoin with the same room code.`);
+          } else {
+            showToast(`${seatLabel(seat)} disconnected.`);
+          }
           if (seat === 'analyst') {
             // Stats Riley (AI) takes the third seat back over.
             setContestants((prev) => ({
@@ -1107,11 +1288,22 @@ export default function App() {
   // every change, which is ten times a second while a clue timer runs.
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
+    // Phones only need each tile's value; answers and Daily Double spots stay on the host.
+    const tilesOnly = (board: TriviaCategory[]) =>
+      board.map((cat) => ({...cat, clues: cat.clues.map((q) => ({id: q.id, value: q.value, category: q.category}))}));
     p2pRef.current.send({
       type: 'STATE_SYNC',
-      payload: {round1Board, round2Board, difficulty, answerMode, finalClue, seats: remoteSeats},
+      payload: {
+        round1Board: tilesOnly(round1Board),
+        round2Board: tilesOnly(round2Board),
+        difficulty,
+        answerMode,
+        finalClue: finalClue && (finalShowdownPhase === 'RESULTS' ? finalClue : hideAnswer(finalClue)),
+        finalOptions,
+        seats: remoteSeats,
+      },
     });
-  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, remoteSeats]);
+  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats]);
 
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
@@ -1123,9 +1315,11 @@ export default function App() {
         answeredClueIds: Array.from(answeredClueIds),
         activeSelector,
         contestants,
-        activeClue,
+        activeClue:
+          activeClue && activeClue.phase !== 'REVEALED' ? {...activeClue, clue: hideAnswer(activeClue.clue)} : activeClue,
         finalShowdownPhase,
         finalShowdownTimer,
+        finalLocks,
       },
     });
   }, [
@@ -1138,6 +1332,7 @@ export default function App() {
     activeClue,
     finalShowdownPhase,
     finalShowdownTimer,
+    finalLocks,
     remoteSeats,
   ]);
 
@@ -1310,10 +1505,7 @@ export default function App() {
               }
 
               const newLockouts = {...prev.buzzerLockout, [buzzedId]: true};
-              const activeContestantsList: ContestantId[] = isTwoPlayerMode || isClientConnected
-                ? ['player', 'player2', 'analyst']
-                : ['player', 'coach', 'analyst'];
-              const allLocked = activeContestantsList.every((id) => newLockouts[id]);
+              const allLocked = buzzerSeats.every((id) => newLockouts[id]);
 
               if (prev.isBonusWager || allLocked) {
                 return {
@@ -1363,7 +1555,7 @@ export default function App() {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [deviceRole, activeClue, gameState.status, isGameMenuOpen, isHowToPlayOpen, isInviteModalOpen, isLeaderboardOpen, isTagEditorOpen, isTwoPlayerMode, isClientConnected, contestants]);
+  }, [deviceRole, activeClue, gameState.status, isGameMenuOpen, isHowToPlayOpen, isInviteModalOpen, isLeaderboardOpen, isTagEditorOpen, buzzerSeats, contestants]);
 
   // AI Buzzer Simulation when BUZZER_OPEN (Host only)
   useEffect(() => {
@@ -1379,41 +1571,11 @@ export default function App() {
     const timeouts: ReturnType<typeof setTimeout>[] = [];
 
     if (coachCanBuzz) {
-      timeouts.push(
-        setTimeout(() => {
-          setActiveClue((prev) => {
-            if (!prev || prev.phase !== 'BUZZER_OPEN' || prev.buzzedContestantId) return prev;
-            gameAudio.playHoverMicroTone();
-            setContestants((c) => ({...c, coach: {...c.coach, reaction: 'buzzing'}}));
-            return {
-              ...prev,
-              phase: 'ANSWERING',
-              buzzedContestantId: 'coach',
-              timer: 3.5,
-              feedbackText: 'Coach Dave buzzed in!',
-            };
-          });
-        }, Math.max(300, coachDelay))
-      );
+      timeouts.push(setTimeout(() => registerBuzzRef.current('coach', Date.now()), Math.max(300, coachDelay)));
     }
 
     if (analystCanBuzz) {
-      timeouts.push(
-        setTimeout(() => {
-          setActiveClue((prev) => {
-            if (!prev || prev.phase !== 'BUZZER_OPEN' || prev.buzzedContestantId) return prev;
-            gameAudio.playHoverMicroTone();
-            setContestants((c) => ({...c, analyst: {...c.analyst, reaction: 'buzzing'}}));
-            return {
-              ...prev,
-              phase: 'ANSWERING',
-              buzzedContestantId: 'analyst',
-              timer: 3.5,
-              feedbackText: 'Stats Riley buzzed in!',
-            };
-          });
-        }, Math.max(300, analystDelay))
-      );
+      timeouts.push(setTimeout(() => registerBuzzRef.current('analyst', Date.now()), Math.max(300, analystDelay)));
     }
 
     return () => {
@@ -1485,8 +1647,7 @@ export default function App() {
           }));
 
           const newLockouts = {...prev.buzzerLockout, [buzzedId]: true};
-          const activeList: ContestantId[] = isTwoPlayerMode || isClientConnected ? ['player', 'player2', 'analyst'] : ['player', 'coach', 'analyst'];
-          const allLocked = activeList.every((id) => newLockouts[id]);
+          const allLocked = buzzerSeats.every((id) => newLockouts[id]);
 
           if (isBonus || allLocked) {
             return {
@@ -1510,7 +1671,7 @@ export default function App() {
     }, thinkTime);
 
     return () => clearTimeout(timer);
-  }, [deviceRole, activeClue?.phase, activeClue?.buzzedContestantId, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, aiConfig, contestants, isTwoPlayerMode, isClientConnected, player3Human]);
+  }, [deviceRole, activeClue?.phase, activeClue?.buzzedContestantId, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, aiConfig, contestants, buzzerSeats, player3Human]);
 
   // Spacebar, Enter, number (1-8), and letter (A-H) shortcuts for buzzing and answering
   useEffect(() => {
@@ -1597,7 +1758,7 @@ export default function App() {
     if (currentRound === 'ROUND_1' && answeredCount >= allClueIds.length) {
       gameAudio.playLevelUpStinger();
       setCurrentRound('CHAMPIONSHIP');
-      const sortedContestants = ((isTwoPlayerMode || isClientConnected) ? ['player', 'player2', 'analyst'] : ['player', 'coach', 'analyst']) as ContestantId[];
+      const sortedContestants = [...buzzerSeats];
       sortedContestants.sort((a, b) => contestants[a].score - contestants[b].score);
       setActiveSelector(sortedContestants[0]);
     } else if (currentRound === 'CHAMPIONSHIP' && answeredCount >= allClueIds.length) {
@@ -1607,16 +1768,24 @@ export default function App() {
       setPlayerFinalWager(Math.max(1000, contestants.player.score));
       setPlayer2FinalWager(Math.max(1000, contestants.player2.score));
       setPlayer3FinalWager(Math.max(1000, contestants.analyst.score));
+      setFinalLocks(NO_FINAL_LOCKS);
+      setFinalOptions(finalClue ? generateOptions(finalClue, answerMode) : []);
     }
-  }, [deviceRole, activeClue, currentRound, round1Board, round2Board, answeredClueIds, contestants, isTwoPlayerMode, isClientConnected]);
+  }, [deviceRole, activeClue, currentRound, round1Board, round2Board, answeredClueIds, contestants, buzzerSeats, finalClue, answerMode, generateOptions]);
 
   // Client: start the Final Showdown wager box at the same amount the host assumes (the whole bank).
   useEffect(() => {
     if (deviceRole !== 'CLIENT' || currentRound !== 'FINAL_SHOWDOWN') return;
     setPlayer2FinalWager(Math.max(1000, contestants[mySeat].score));
+    setFinalPlayer2Input('');
     // Only when the round starts, not on every score sync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceRole, currentRound, mySeat]);
+
+  // Host: a friend who dropped can't pick a tile, so Player 1 takes the board until they're back.
+  useEffect(() => {
+    if (deviceRole === 'HOST' && player2Away && activeSelector === 'player2' && !activeClue) setActiveSelector('player');
+  }, [deviceRole, player2Away, activeSelector, activeClue]);
 
   // Final Showdown Wager Confirmation (Host)
   const confirmFinalWagers = useCallback(() => {
@@ -1652,49 +1821,42 @@ export default function App() {
       },
       player2: {
         ...c.player2,
-        wager: player2FinalWager,
+        wager: player2Away ? 0 : player2FinalWager,
       },
     }));
 
     setFinalShowdownPhase('CLUE');
     setFinalShowdownTimer(30);
-  }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, isTwoPlayerMode, isClientConnected]);
+  }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, player2Away, isTwoPlayerMode, isClientConnected]);
 
-  // Record game result to multi-dimensional leaderboard
+  // Record every human player's result on this device's leaderboard. The celebration is for Player 1.
   const saveMatchToLeaderboard = useCallback(
-    (playerScore: number) => {
-      const totalAttempts = matchStats.playerCorrect + matchStats.playerWrong;
-      const accuracy = totalAttempts > 0 ? (matchStats.playerCorrect / totalAttempts) * 100 : 100;
-
+    (finalScores: Record<ContestantId, number>) => {
       const opp = currentOpponentMode;
       const tier = difficulty as TriviaTier;
       const format = answerMode as AnswerFormat;
+      const humans: ContestantId[] = ['player'];
+      if (isTwoPlayerMode || isClientConnected) humans.push('player2');
+      if (player3Human) humans.push('analyst');
 
-      const result = recordLeaderboardEntry(opp, tier, format, {
-        playerName: playerName || 'Champion',
-        score: playerScore,
-        accuracy,
-        questionsAnswered: totalAttempts,
-        dailyDoublesWon: matchStats.bonusWagersHit,
-      });
-
-      setLeaderboardRefreshCounter((c) => c + 1);
-
-      if (result.isTop10) {
-        setHighScoreCelebration({
-          rank: result.rank,
-          isHighScore: result.isHighScore,
-          score: playerScore,
-          opponent: opp,
-          tier,
-          format,
+      for (const id of humans) {
+        const c = contestants[id];
+        const attempts = c.correctCount + c.wrongCount;
+        const result = recordLeaderboardEntry(opp, tier, format, {
+          playerName: id === 'player' ? playerName || 'Champion' : c.name,
+          score: finalScores[id],
+          accuracy: attempts > 0 ? (c.correctCount / attempts) * 100 : 100,
+          questionsAnswered: attempts,
+          dailyDoublesWon: c.bonusHits || 0,
         });
-        if (result.isHighScore) {
-          gameAudio.playVictoryFanfare();
+        if (id === 'player' && result.isTop10) {
+          setHighScoreCelebration({rank: result.rank, isHighScore: result.isHighScore, score: finalScores[id], opponent: opp, tier, format});
+          if (result.isHighScore) gameAudio.playVictoryFanfare();
         }
       }
+      setLeaderboardRefreshCounter((c) => c + 1);
     },
-    [matchStats, currentOpponentMode, difficulty, answerMode, playerName]
+    [currentOpponentMode, difficulty, answerMode, playerName, contestants, isTwoPlayerMode, isClientConnected, player3Human]
   );
 
   // Final Showdown Resolution (Host)
@@ -1703,13 +1865,20 @@ export default function App() {
     if (!finalClue || finalShowdownPhase !== 'CLUE') return;
 
     const threshold = getConfig('fuzzyMatchThreshold') as number;
-    const playerCorrect = checkTypedAnswer(finalPlayerInput, finalClue, threshold);
-    const player2Correct = (isTwoPlayerMode || isClientConnected) ? checkTypedAnswer(finalPlayer2Input, finalClue, threshold) : false;
+    // Multiple choice needs the exact option; typed answers get the usual spelling tolerance.
+    const isRight = (input: string) =>
+      finalOptions.length
+        ? input.trim().toLowerCase() === finalClue.correctAnswer.trim().toLowerCase()
+        : checkTypedAnswer(input, finalClue, threshold);
+    const playerCorrect = isRight(finalPlayerInput);
+    const player2Correct = (isTwoPlayerMode || isClientConnected) ? isRight(finalPlayer2Input) : false;
 
     const coachCorrect = Math.random() < aiConfig.coachAcc;
-    const analystCorrect = player3Human
-      ? checkTypedAnswer(finalPlayer3Input, finalClue, threshold)
-      : Math.random() < aiConfig.analystAcc;
+    const analystCorrect = player3Human ? isRight(finalPlayer3Input) : Math.random() < aiConfig.analystAcc;
+    // A wrong AI answer is one of the choices everyone else saw.
+    const wrongChoices = finalOptions.length
+      ? finalOptions.filter((o) => o !== finalClue.correctAnswer)
+      : finalClue.distractors;
 
     const coachScoreDelta = coachCorrect ? contestants.coach.wager : -contestants.coach.wager;
     const analystScoreDelta = analystCorrect ? contestants.analyst.wager : -contestants.analyst.wager;
@@ -1728,7 +1897,7 @@ export default function App() {
         score: finalCoachScore,
         reaction: coachCorrect ? 'correct' : 'wrong',
         finalCorrect: coachCorrect,
-        finalAnswer: coachCorrect ? finalClue.correctAnswer : finalClue.distractors[0],
+        finalAnswer: coachCorrect ? finalClue.correctAnswer : wrongChoices[0] || '(No Answer)',
       },
       analyst: {
         ...c.analyst,
@@ -1739,7 +1908,7 @@ export default function App() {
           ? finalPlayer3Input || '(No Answer)'
           : analystCorrect
           ? finalClue.correctAnswer
-          : finalClue.distractors[1],
+          : wrongChoices[1] || wrongChoices[0] || '(No Answer)',
       },
       player: {
         ...c.player,
@@ -1772,7 +1941,12 @@ export default function App() {
       (player3Human && finalAnalystScore === highestScore);
 
     // Save final match score to persistent Leaderboard
-    saveMatchToLeaderboard(finalPlayerScore);
+    saveMatchToLeaderboard({
+      player: finalPlayerScore,
+      player2: finalPlayer2Score,
+      analyst: finalAnalystScore,
+      coach: finalCoachScore,
+    });
 
     if (humanWon) {
       gameAudio.playVictoryFanfare();
@@ -1781,7 +1955,16 @@ export default function App() {
       gameAudio.playDefeatMotif();
       setGameState((prev) => ({...prev, status: 'GAME_OVER', score: finalPlayerScore}));
     }
-  }, [finalClue, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
+  }, [finalClue, finalOptions, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
+
+  // With friends on phones, the Final waits until each player has locked in (or the clock runs out).
+  const allRemoteWagersLocked = onlineRemoteSeats.every((seat) => finalLocks.wager[seat]);
+  const allFinalAnswersLocked =
+    Boolean(finalLocks.answer.player) && onlineRemoteSeats.every((seat) => finalLocks.answer[seat]);
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || finalShowdownPhase !== 'CLUE' || onlineRemoteSeats.length === 0) return;
+    if (allFinalAnswersLocked) finalizeFinalShowdownRef.current();
+  }, [deviceRole, finalShowdownPhase, allFinalAnswersLocked, onlineRemoteSeats.length]);
 
   // The countdown reads the latest finalize through a ref. Depending on it directly restarted
   // the 1-second interval on every keystroke, so the clock stalled while anyone typed.
@@ -1921,6 +2104,7 @@ export default function App() {
 
             <button
               onClick={() => {
+                if (!window.confirm('Leave this game and host your own on this phone?')) return;
                 setDeviceRole('HOST');
                 showToast('Switched to Host Arena mode');
               }}
@@ -2025,8 +2209,11 @@ export default function App() {
                 </div>
               )}
 
-              {/* C. Daily Double Wager for Player 2 */}
-              {isDailyDoubleForMe && !activeClue.bonusWagerLocked && (
+              {/* C. Daily Double Wager for this phone's player. Typed here, sent to the host on confirm. */}
+              {isDailyDoubleForMe && !activeClue.bonusWagerLocked && (() => {
+                const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score);
+                const wager = Math.max(5, Math.min(maxVal, parseInt(clientWager) || 5));
+                return (
                 <div className="w-full bg-slate-900 border-2 border-amber-400 rounded-2xl p-4 flex flex-col items-center gap-3">
                   <div className="text-xs font-black text-amber-300 uppercase flex items-center gap-1.5">
                     <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
@@ -2035,54 +2222,31 @@ export default function App() {
 
                   <div className="text-[11px] text-slate-300">
                     Bankroll: <strong className="text-amber-400">${contestants[mySeat].score.toLocaleString()}</strong> | Min: $5 | Max: $
-                    {Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score).toLocaleString()}
+                    {maxVal.toLocaleString()}
                   </div>
 
                   <div className="flex items-center gap-2 w-full justify-center">
                     <span className="text-lg font-bold text-amber-400">$</span>
                     <input
                       type="number"
+                      inputMode="numeric"
                       min={5}
-                      max={Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score)}
-                      value={activeClue.bonusWagerInput}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value) || 5;
-                        p2pRef.current?.send({
-                          type: 'CLIENT_SET_WAGER',
-                          contestantId: mySeat,
-                          wager: val,
-                          lockIn: false,
-                        });
-                      }}
+                      max={maxVal}
+                      value={clientWager}
+                      onChange={(e) => setClientWager(e.target.value)}
                       className="w-32 bg-slate-950 border-2 border-amber-400 text-amber-300 font-black text-center text-xl py-1 rounded-lg"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 w-full">
                     <button
-                      onClick={() => {
-                        const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score);
-                        p2pRef.current?.send({
-                          type: 'CLIENT_SET_WAGER',
-                          contestantId: mySeat,
-                          wager: maxVal,
-                          lockIn: false,
-                        });
-                      }}
+                      onClick={() => setClientWager(String(maxVal))}
                       className="py-2 px-2 bg-blue-950 border border-blue-700 text-blue-200 rounded-lg text-xs font-bold">
                       TRUE DAILY DOUBLE (MAX)
                     </button>
 
                     <button
-                      onClick={() => {
-                        const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score);
-                        p2pRef.current?.send({
-                          type: 'CLIENT_SET_WAGER',
-                          contestantId: mySeat,
-                          wager: Math.max(50, Math.floor(maxVal / 2)),
-                          lockIn: false,
-                        });
-                      }}
+                      onClick={() => setClientWager(String(Math.max(50, Math.floor(maxVal / 2))))}
                       className="py-2 px-2 bg-blue-950 border border-blue-700 text-blue-200 rounded-lg text-xs font-bold">
                       HALF BANK
                     </button>
@@ -2090,19 +2254,15 @@ export default function App() {
 
                   <button
                     onClick={() => {
-                      p2pRef.current?.send({
-                        type: 'CLIENT_SET_WAGER',
-                        contestantId: mySeat,
-                        wager: activeClue.bonusWagerInput,
-                        lockIn: true,
-                      });
+                      p2pRef.current?.send({type: 'CLIENT_SET_WAGER', contestantId: mySeat, wager, lockIn: true});
                     }}
                     className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black rounded-xl text-sm shadow-lg active:scale-95 flex items-center justify-center gap-1.5">
                     <Zap className="w-4 h-4 fill-slate-950" />
-                    <span>CONFIRM WAGER & REVEAL CLUE</span>
+                    <span>CONFIRM ${wager.toLocaleString()} & REVEAL CLUE</span>
                   </button>
                 </div>
-              )}
+                );
+              })()}
 
               {/* D. Answering Phase (If Player 2 Buzzed In or Daily Double is Active for P2) */}
               {activeClue.phase === 'ANSWERING' && isPlayer2Buzzed && (!activeClue.isBonusWager || activeClue.bonusWagerLocked) && (
@@ -2118,8 +2278,8 @@ export default function App() {
                       size="large"
                       label="SAY YOUR ANSWER"
                       onHeard={(heard) =>
-                        answerByVoice(heard, (answer) =>
-                          p2pRef.current?.send({type: 'CLIENT_ANSWER', contestantId: mySeat, answer})
+                        answerByVoice(heard, (answer, alternatives) =>
+                          p2pRef.current?.send({type: 'CLIENT_ANSWER', contestantId: mySeat, answer, alternatives})
                         )
                       }
                     />
@@ -2173,8 +2333,8 @@ export default function App() {
                   <VoiceAnswerButton
                     key={activeClue.clue.id}
                     onHeard={(heard) =>
-                      answerByVoice(heard, (answer) =>
-                        p2pRef.current?.send({type: 'CLIENT_ANSWER', contestantId: mySeat, answer})
+                      answerByVoice(heard, (answer, alternatives) =>
+                        p2pRef.current?.send({type: 'CLIENT_ANSWER', contestantId: mySeat, answer, alternatives})
                       )
                     }
                   />
@@ -2241,8 +2401,14 @@ export default function App() {
             </div>
           )}
 
-          {/* 4. Final Showdown for Player 2 */}
-          {gameState.status === 'PLAYING' && currentRound === 'FINAL_SHOWDOWN' && (
+          {/* 4. Final Showdown for this phone's player: lock a wager, then lock an answer */}
+          {gameState.status === 'PLAYING' && currentRound === 'FINAL_SHOWDOWN' && (() => {
+            const maxWager = Math.max(1000, contestants[mySeat].score);
+            const wagerLocked = Boolean(finalLocks.wager[mySeat]);
+            const answerLocked = Boolean(finalLocks.answer[mySeat]);
+            const sendAnswer = (answer: string, lockIn = false) =>
+              p2pRef.current?.send({type: 'CLIENT_FINAL_ANSWER', contestantId: mySeat, answer, lockIn});
+            return (
             <div className="w-full bg-slate-900 border-2 border-amber-400 rounded-2xl p-4 text-center flex flex-col items-center gap-3">
               <Flame className="w-8 h-8 text-amber-400 animate-pulse" />
               <h2 className="text-base font-black text-amber-400 uppercase">FINAL SHOWDOWN</h2>
@@ -2252,26 +2418,38 @@ export default function App() {
 
               {finalShowdownPhase === 'WAGER' && (
                 <div className="w-full flex flex-col gap-2">
-                  <div className="text-xs text-slate-300">Enter your final cash wager:</div>
-                  <div className="flex justify-center items-center gap-2">
-                    <span className="text-lg font-bold text-amber-400">$</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={Math.max(1000, contestants[mySeat].score)}
-                      value={player2FinalWager}
-                      onChange={(e) => {
-                        const val = Math.max(0, Math.min(Math.max(1000, contestants[mySeat].score), parseInt(e.target.value) || 0));
-                        setPlayer2FinalWager(val);
-                        p2pRef.current?.send({
-                          type: 'CLIENT_FINAL_WAGER',
-                          contestantId: mySeat,
-                          wager: val,
-                        });
-                      }}
-                      className="w-32 bg-slate-950 border border-amber-400 px-3 py-1.5 rounded-lg text-amber-300 font-black text-center"
-                    />
-                  </div>
+                  {wagerLocked ? (
+                    <div className="text-sm font-black text-emerald-400">
+                      Wager locked at ${player2FinalWager.toLocaleString()}. Waiting for the clue...
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-xs text-slate-300">Enter your final cash wager (up to ${maxWager.toLocaleString()}):</div>
+                      <div className="flex justify-center items-center gap-2">
+                        <span className="text-lg font-bold text-amber-400">$</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          max={maxWager}
+                          value={player2FinalWager}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(maxWager, parseInt(e.target.value) || 0));
+                            setPlayer2FinalWager(val);
+                            p2pRef.current?.send({type: 'CLIENT_FINAL_WAGER', contestantId: mySeat, wager: val});
+                          }}
+                          className="w-32 bg-slate-950 border border-amber-400 px-3 py-1.5 rounded-lg text-amber-300 font-black text-center"
+                        />
+                      </div>
+                      <button
+                        onClick={() =>
+                          p2pRef.current?.send({type: 'CLIENT_FINAL_WAGER', contestantId: mySeat, wager: player2FinalWager, lockIn: true})
+                        }
+                        className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl text-sm shadow-lg active:scale-95">
+                        LOCK WAGER
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -2281,34 +2459,54 @@ export default function App() {
                   <div className="p-3 bg-slate-950 rounded-lg text-xs font-medium text-slate-200 border border-blue-800">
                     {finalClue?.clue}
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Type final answer..."
-                    value={finalPlayer2Input}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFinalPlayer2Input(val);
-                      p2pRef.current?.send({
-                        type: 'CLIENT_FINAL_ANSWER',
-                        contestantId: mySeat,
-                        answer: val,
-                      });
-                    }}
-                    className="w-full bg-slate-950 border-2 border-amber-400 px-3 py-2 rounded-lg text-white font-bold text-center"
-                  />
-                  <VoiceAnswerButton
-                    label="SAY FINAL ANSWER"
-                    onHeard={(heard) =>
-                      finalAnswerByVoice(heard, (answer) => {
-                        setFinalPlayer2Input(answer);
-                        p2pRef.current?.send({type: 'CLIENT_FINAL_ANSWER', contestantId: mySeat, answer});
-                      })
-                    }
-                  />
+                  {answerLocked ? (
+                    <div className="text-sm font-black text-emerald-400">
+                      Answer locked: "{finalPlayer2Input || '(no answer)'}". Waiting for the others...
+                    </div>
+                  ) : (
+                    <>
+                      {finalOptions.length ? (
+                        <FinalChoices
+                          options={finalOptions}
+                          value={finalPlayer2Input}
+                          onPick={(opt) => {
+                            setFinalPlayer2Input(opt);
+                            sendAnswer(opt);
+                          }}
+                        />
+                      ) : (
+                      <input
+                        type="text"
+                        placeholder="Type final answer..."
+                        value={finalPlayer2Input}
+                        onChange={(e) => {
+                          setFinalPlayer2Input(e.target.value);
+                          sendAnswer(e.target.value);
+                        }}
+                        className="w-full bg-slate-950 border-2 border-amber-400 px-3 py-2 rounded-lg text-white font-bold text-center"
+                      />
+                      )}
+                      <VoiceAnswerButton
+                        label="SAY FINAL ANSWER"
+                        onHeard={(heard) =>
+                          finalAnswerByVoice(heard, (answer) => {
+                            setFinalPlayer2Input(answer);
+                            sendAnswer(answer);
+                          })
+                        }
+                      />
+                      <button
+                        onClick={() => sendAnswer(finalPlayer2Input, true)}
+                        className="w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 font-black rounded-xl text-sm shadow-lg active:scale-95">
+                        LOCK IN ANSWER
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
-          )}
+            );
+          })()}
 
           {/* 5. Post Game Standings */}
           {(gameState.status === 'VICTORY' || gameState.status === 'GAME_OVER') && (
@@ -2670,8 +2868,18 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Player 2 Wager Input if in 2P Duel */}
-                    {(isTwoPlayerMode || isClientConnected) && (
+                    {/* Friends on phones set their own wagers; the host only sees whether they've locked */}
+                    {onlineRemoteSeats.map((seat) => (
+                      <div key={seat} className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/50 flex items-center justify-between gap-2 text-xs font-bold">
+                        <span className="text-amber-300">{contestants[seat].name}</span>
+                        <span className={finalLocks.wager[seat] ? 'text-emerald-400' : 'text-slate-400 animate-pulse'}>
+                          {finalLocks.wager[seat] ? '✓ Wager locked' : 'Choosing on their phone...'}
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* Player 2 Wager Input in pass & play */}
+                    {isTwoPlayerMode && !isClientConnected && (
                       <div className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/50">
                         <div className="text-xs font-bold text-amber-300 mb-1">
                           {contestants.player2.name} (Bank: ${contestants.player2.score.toLocaleString()}):
@@ -2706,9 +2914,10 @@ export default function App() {
 
                   <button
                     onClick={confirmFinalWagers}
-                    className="min-w-[48px] min-h-[48px] mt-2 px-6 sm:px-8 py-3 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-sm sm:text-base shadow-lg transition-transform active:scale-95 flex items-center gap-2">
+                    disabled={!allRemoteWagersLocked}
+                    className="min-w-[48px] min-h-[48px] mt-2 px-6 sm:px-8 py-3 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-sm sm:text-base shadow-lg transition-transform active:scale-95 flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait">
                     <Zap className="w-5 h-5" />
-                    LOCK IN WAGER & REVEAL CLUE
+                    {allRemoteWagersLocked ? 'LOCK IN WAGER & REVEAL CLUE' : 'WAITING FOR WAGERS...'}
                   </button>
                 </div>
               )}
@@ -2725,17 +2934,37 @@ export default function App() {
                   </div>
 
                   <div className="w-full max-w-md flex flex-col gap-2.5">
+                    {finalOptions.length ? (
+                      <>
+                        {(isTwoPlayerMode || isClientConnected) && (
+                          <div className="text-xs font-bold text-amber-300">{playerName} (P1), pick your answer:</div>
+                        )}
+                        <FinalChoices
+                          options={finalOptions}
+                          value={finalPlayerInput}
+                          onPick={setFinalPlayerInput}
+                          disabled={Boolean(finalLocks.answer.player)}
+                        />
+                      </>
+                    ) : (
                     <input
                       type="text"
                       placeholder={(isTwoPlayerMode || isClientConnected) ? `${playerName} (P1): Type final answer...` : 'Type your final answer here...'}
                       value={finalPlayerInput}
                       onChange={(e) => setFinalPlayerInput(e.target.value)}
+                      disabled={Boolean(finalLocks.answer.player)}
                       autoFocus
                       className="w-full bg-slate-950 border-2 border-amber-500 text-white text-sm sm:text-base font-bold px-4 py-2 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
+                    )}
                     <VoiceAnswerButton label="SAY FINAL ANSWER" onHeard={(heard) => finalAnswerByVoice(heard, setFinalPlayerInput)} />
 
-                    {(isTwoPlayerMode || isClientConnected) && !isClientConnected && (
+                    {(isTwoPlayerMode || isClientConnected) && !isClientConnected && (finalOptions.length ? (
+                      <>
+                        <div className="text-xs font-bold text-emerald-300">Player 2, pick your answer:</div>
+                        <FinalChoices options={finalOptions} value={finalPlayer2Input} onPick={setFinalPlayer2Input} />
+                      </>
+                    ) : (
                       <input
                         type="text"
                         placeholder="Player 2: Type final answer..."
@@ -2743,14 +2972,34 @@ export default function App() {
                         onChange={(e) => setFinalPlayer2Input(e.target.value)}
                         className="w-full bg-slate-950 border-2 border-amber-500 text-white text-sm sm:text-base font-bold px-4 py-2 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
                       />
-                    )}
+                    ))}
 
-                    <button
-                      onClick={finalizeFinalShowdown}
-                      className="min-w-[48px] min-h-[48px] w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-lg shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 text-sm sm:text-base">
-                      <CheckCircle2 className="w-5 h-5" />
-                      SUBMIT FINAL ANSWER
-                    </button>
+                    {/* With friends on phones, Player 1 locks their own answer instead of ending the round for everyone */}
+                    {onlineRemoteSeats.length > 0 ? (
+                      <>
+                        <button
+                          onClick={() => setFinalLocks((l) => ({...l, answer: {...l.answer, player: true}}))}
+                          disabled={Boolean(finalLocks.answer.player)}
+                          className="min-w-[48px] min-h-[48px] w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-lg shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 text-sm sm:text-base disabled:opacity-60">
+                          <CheckCircle2 className="w-5 h-5" />
+                          {finalLocks.answer.player ? 'ANSWER LOCKED' : 'LOCK IN MY ANSWER'}
+                        </button>
+                        <div className="text-[11px] text-slate-300 flex flex-wrap justify-center gap-x-3">
+                          {onlineRemoteSeats.map((seat) => (
+                            <span key={seat} className={finalLocks.answer[seat] ? 'text-emerald-400' : 'text-slate-400'}>
+                              {contestants[seat].name}: {finalLocks.answer[seat] ? '✓ locked' : 'thinking...'}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <button
+                        onClick={finalizeFinalShowdown}
+                        className="min-w-[48px] min-h-[48px] w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-lg shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 text-sm sm:text-base">
+                        <CheckCircle2 className="w-5 h-5" />
+                        SUBMIT FINAL ANSWER
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -3535,7 +3784,7 @@ export default function App() {
                       leaderboardFilterFormat
                     );
                     setLeaderboardRefreshCounter((c) => c + 1);
-                    showToast('Reset category records to benchmark');
+                    showToast('Cleared this leaderboard');
                   }}
                   className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1">
                   <Trash2 className="w-3.5 h-3.5 text-slate-400" />
@@ -3546,7 +3795,7 @@ export default function App() {
                   onClick={() => {
                     resetAllLeaderboards();
                     setLeaderboardRefreshCounter((c) => c + 1);
-                    showToast('All leaderboards reset to benchmarks');
+                    showToast('Cleared all leaderboards');
                   }}
                   className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold">
                   Reset All
