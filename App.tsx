@@ -41,17 +41,9 @@ import {
   X,
   Lock,
 } from 'lucide-react';
-import {getConfig, THEME} from './constants';
+import {SETTINGS} from './constants';
 import BackgroundMusic from './utils/BackgroundMusic';
-import {
-  formatTime,
-  gameAudio,
-  GameState,
-  MenuOverlay,
-  useAssets,
-  useAutoFocus,
-  useIsMobile,
-} from './utils/helper';
+import {gameAudio, GameState, MenuOverlay, useAutoFocus, useIsMobile} from './utils/helper';
 import {
   buildQuestionOptions,
   checkTypedAnswer,
@@ -89,13 +81,8 @@ import {
   TriviaTier,
 } from './utils/leaderboard';
 
-// Asset manifests
-const ASSETS_MANIFEST: Record<string, string> = {
-  bgStudio: 'assets/images/bg_studio_arena.png',
-  podium: 'assets/images/podium_contestant.png',
-  buzzerActive: 'assets/images/icon_buzzer_active.png',
-  trophyGold: 'assets/images/icon_trophy_gold.png',
-};
+const IMG_STUDIO = 'assets/images/bg_studio_arena.png';
+const IMG_TROPHY = 'assets/images/icon_trophy_gold.png';
 
 const BGM_TRIVIA = 'assets/audio/bgm_trivia_stage.mp3';
 const BGM_FINAL = 'assets/audio/bgm_final_showdown.mp3';
@@ -253,7 +240,6 @@ function FinalChoices({
 
 export default function App() {
   const isMobile = useIsMobile();
-  const {assets, isReady: assetsReady} = useAssets(ASSETS_MANIFEST);
 
   // Audio mute controls: Music MUST be OFF by default, SFX MUST be ON by default
   const [sfxMuted, setSfxMuted] = useState(false);
@@ -640,7 +626,7 @@ export default function App() {
   const answerByVoice = (heard: string[], submit: (answer: string, guesses?: string[]) => void): string | void => {
     if (!activeClue) return;
     if (isOpenAnswerMode(answerMode)) {
-      const answer = pickSpokenTypedAnswer(heard, activeClue.clue, getConfig('fuzzyMatchThreshold') as number);
+      const answer = pickSpokenTypedAnswer(heard, activeClue.clue, SETTINGS.fuzzyMatchThreshold);
       if (!answer) return answerMode === 'VOICE' ? "Didn't catch that. Tap the mic and try again." : "Didn't catch that. Try again or type it.";
       setActiveClue((prev) => (prev ? {...prev, typedInput: answer} : null));
       submit(answer, heard);
@@ -660,7 +646,7 @@ export default function App() {
       setAnswer(match);
       return;
     }
-    const answer = pickSpokenTypedAnswer(heard, finalClue, getConfig('fuzzyMatchThreshold') as number);
+    const answer = pickSpokenTypedAnswer(heard, finalClue, SETTINGS.fuzzyMatchThreshold);
     if (!answer) return "Didn't catch that. Try again or type it.";
     setAnswer(answer);
     return `Heard "${answer}". Fix it if needed, then submit.`;
@@ -708,8 +694,8 @@ export default function App() {
         phase: isBonus ? 'ANSWERING' : 'READING',
         buzzedContestantId: isBonus ? pickerId : null,
         buzzerLockout: {coach: false, player: false, analyst: false, player2: false},
-        timer: isBonus ? 12.0 : (getConfig('buzzerLightDelay') as number),
-        maxTimer: isBonus ? 12.0 : (getConfig('buzzerLightDelay') as number),
+        timer: isBonus ? 12.0 : SETTINGS.buzzerLightDelay,
+        maxTimer: isBonus ? 12.0 : SETTINGS.buzzerLightDelay,
         options,
         isBonusWager: isBonus,
         bonusSelectingPlayerId: pickerId,
@@ -763,8 +749,8 @@ export default function App() {
         return {
           ...prev,
           bonusWagerLocked: true,
-          timer: (getConfig('questionTimeLimit') as number) || 12.0,
-          maxTimer: (getConfig('questionTimeLimit') as number) || 12.0,
+          timer: SETTINGS.questionTimeLimit || 12.0,
+          maxTimer: SETTINGS.questionTimeLimit || 12.0,
           feedbackText: `${pName} locked in wager at $${prev.bonusWagerInput.toLocaleString()}! Reading clue...`,
         };
       });
@@ -961,7 +947,7 @@ export default function App() {
 
       const isBonus = activeClue.isBonusWager;
       const wagerAmount = isBonus ? activeClue.bonusWagerInput : activeClue.clue.value;
-      const threshold = getConfig('fuzzyMatchThreshold') as number;
+      const threshold = SETTINGS.fuzzyMatchThreshold;
       // Phones don't get the answer, so they send all the recognizer's guesses and the host picks.
       if (spokenGuesses?.length && isOpenAnswerMode(answerMode)) {
         answer = pickSpokenTypedAnswer(spokenGuesses, activeClue.clue, threshold) || answer;
@@ -1380,12 +1366,14 @@ export default function App() {
 
     let chosen = availableClues[Math.floor(Math.random() * availableClues.length)];
     if (activeSelector === 'coach') {
-      const football = availableClues.filter((c) => c.category.includes('NFL') || c.category.includes('NCAA') || c.category.includes('GRIDIRON'));
-      if (football.length > 0 && Math.random() < 0.7) {
-        chosen = football[Math.floor(Math.random() * football.length)];
+      // The coach plays it safe and usually works down from the cheapest clues.
+      const lowest = Math.min(...availableClues.map((c) => c.value));
+      const safe = availableClues.filter((c) => c.value === lowest);
+      if (Math.random() < 0.7) {
+        chosen = safe[Math.floor(Math.random() * safe.length)];
       }
     } else if (activeSelector === 'analyst') {
-      const highVal = availableClues.filter((c) => c.value >= 800 || c.category.includes('RECORD') || c.category.includes('SCORING'));
+      const highVal = availableClues.filter((c) => c.value >= 800 || c.category.includes('RECORD'));
       if (highVal.length > 0 && Math.random() < 0.75) {
         chosen = highVal[Math.floor(Math.random() * highVal.length)];
       }
@@ -1454,8 +1442,8 @@ export default function App() {
             return {
               ...prev,
               phase: 'BUZZER_OPEN',
-              timer: getConfig('questionTimeLimit') as number,
-              maxTimer: getConfig('questionTimeLimit') as number,
+              timer: SETTINGS.questionTimeLimit,
+              maxTimer: SETTINGS.questionTimeLimit,
               feedbackText: 'BUZZERS ACTIVE! Buzz in now!',
             };
           }
@@ -1564,7 +1552,7 @@ export default function App() {
     const coachCanBuzz = !isTwoPlayerMode && !isClientConnected && !activeClue.buzzerLockout.coach;
     const analystCanBuzz = !player3Human && !activeClue.buzzerLockout.analyst;
 
-    const reflexMult = getConfig('aiReflexSpeedMultiplier') as number;
+    const reflexMult = SETTINGS.aiReflexSpeedMultiplier;
     const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult;
     const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult;
 
@@ -1864,7 +1852,7 @@ export default function App() {
     // Runs once: the submit button and the countdown can both get here.
     if (!finalClue || finalShowdownPhase !== 'CLUE') return;
 
-    const threshold = getConfig('fuzzyMatchThreshold') as number;
+    const threshold = SETTINGS.fuzzyMatchThreshold;
     // Multiple choice needs the exact option; typed answers get the usual spelling tolerance.
     const isRight = (input: string) =>
       finalOptions.length
@@ -2559,13 +2547,11 @@ export default function App() {
 
       {/* Arena Visual Backdrop */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        {assetsReady && assets.bgStudio && (
-          <img
-            src={assets.bgStudio.src}
-            alt="Sports Studio Arena"
-            className="w-full h-full object-cover opacity-35 filter blur-[1px] transform scale-105"
-          />
-        )}
+        <img
+          src={IMG_STUDIO}
+          alt=""
+          className="w-full h-full object-cover opacity-35 filter blur-[1px] transform scale-105"
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/75 to-blue-950/50" />
       </div>
 
@@ -4247,7 +4233,7 @@ export default function App() {
                 </span>
               </div>
               <div className="text-[10px] text-emerald-400/80 mt-1 font-semibold">
-                100+ unique questions per category with strict zero-repeat question, category, and answer enforcement
+                New questions come first. Ones this device has seen only come back when a category runs low.
               </div>
             </div>
 
@@ -4414,13 +4400,11 @@ export default function App() {
           <div className="w-full max-w-md bg-slate-900 border-2 border-amber-400 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col items-center text-center">
             {/* Trophy Icon */}
             <div className="relative w-14 h-14 sm:w-16 sm:h-16 mb-1">
-              {assetsReady && assets.trophyGold && (
-                <img
-                  src={assets.trophyGold.src}
-                  alt="Championship Trophy"
-                  className="w-full h-full object-contain filter drop-shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-pulse"
-                />
-              )}
+              <img
+                src={IMG_TROPHY}
+                alt="Championship Trophy"
+                className="w-full h-full object-contain filter drop-shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-pulse"
+              />
             </div>
 
             <h1 className="text-lg sm:text-2xl md:text-3xl font-black text-amber-400 tracking-wider uppercase mb-1">

@@ -1,36 +1,14 @@
 /**
- * Sports Arena Quiz - High-Dimensional Factual Knowledge Trivia Engine
- * 
- * Strict Scope (Exclusively 6-8 Prestigious Sports Categories):
- * 1. NFL (National Football League)
- * 2. NBA (National Basketball Association)
- * 3. NCAA College Football (CFB)
- * 4. NCAA March Madness (College Basketball)
- * 5. MLB (Major League Baseball)
- * 6. NHL (National Hockey League)
- * 7. Soccer / World Cup & Global Sports
- * 8. Tennis, Golf & Olympic Immortals
- * 
- * Questions come from the hand-written bank in triviaDatasetPart.ts plus banks
- * loaded at runtime (public/questions/nfl.json, built from nflverse data).
+ * Sports Arena Quiz question engine (NFL only).
  *
- * Guarantees:
- * - Zero repeats of questions within the same game session (`usedQuestionIds`).
- * - Zero repeats of categories within the same game session (`usedCategoryIds`).
- * - Zero repeats of answers within the same game session (`usedAnswers` / `normalizeAnswer`).
- * - No clue ever contains or spoils the answer text.
- * - 8-choice option generation (1 correct + 7 distinct plausible peer distractors).
+ * Questions come from the hand-written bank in triviaDatasetPart.ts plus banks
+ * loaded at runtime (public/questions/nfl.json, built weekly from nflverse data).
+ *
+ * Within one game no question, category or answer repeats, and questions this
+ * device has already seen are used last.
  */
 
-export type SportTag =
-  | 'NFL'
-  | 'NBA'
-  | 'NCAA_FOOTBALL'
-  | 'NCAA_BASKETBALL'
-  | 'NHL'
-  | 'MLB'
-  | 'SOCCER'
-  | 'GLOBAL_SPORTS';
+export type SportTag = 'NFL';
 
 export interface QuestionClue {
   id: string;
@@ -157,101 +135,6 @@ export const PEER_BANKS = {
     'Andy Reid', 'Bill Walsh', 'Mike Tomlin', 'Sean McVay', 'John Madden',
     'Jimmy Johnson', 'Tony Dungy', 'Mike Ditka', 'Pete Carroll', 'Sean Payton',
   ],
-  nba_guards: [
-    'Michael Jordan', 'Kobe Bryant', 'Stephen Curry', 'Dwyane Wade', 'Allen Iverson',
-    'James Harden', 'Russell Westbrook', 'Kyrie Irving', 'Damian Lillard', 'Luka Doncic',
-    'Devin Booker', 'Magic Johnson', 'Jerry West', 'Oscar Robertson', 'John Stockton',
-    'Isiah Thomas', 'Steve Nash', 'Chris Paul', 'Gary Payton', 'Jason Kidd',
-    'Reggie Miller', 'Ray Allen', 'Klay Thompson', 'Manu Ginobili', 'Tony Parker',
-  ],
-  nba_forwards_bigs: [
-    'LeBron James', 'Kevin Durant', 'Larry Bird', 'Tim Duncan', 'Kevin Garnett',
-    'Dirk Nowitzki', 'Giannis Antetokounmpo', 'Kawhi Leonard', 'Charles Barkley', 'Karl Malone',
-    'Bill Russell', 'Wilt Chamberlain', 'Kareem Abdul-Jabbar', "Shaquille O'Neal", 'Hakeem Olajuwon',
-    'David Robinson', 'Patrick Ewing', 'Nikola Jokic', 'Joel Embiid', 'Anthony Davis',
-    'Ben Wallace', 'Dikembe Mutombo', 'Dwight Howard', 'Dennis Rodman', 'Rudy Gobert',
-  ],
-  nba_teams: [
-    'Chicago Bulls', 'Los Angeles Lakers', 'Boston Celtics', 'Golden State Warriors',
-    'Miami Heat', 'San Antonio Spurs', 'Philadelphia 76ers', 'Houston Rockets',
-    'Detroit Pistons', 'New York Knicks', 'Milwaukee Bucks', 'Dallas Mavericks',
-    'Phoenix Suns', 'Toronto Raptors', 'Denver Nuggets', 'Oklahoma City Thunder',
-  ],
-  cfb_players: [
-    'Charles Woodson', 'Barry Sanders', 'Archie Griffin', 'Doug Flutie', 'Joe Burrow',
-    'Tim Tebow', 'Vince Young', 'DeVonta Smith', 'Caleb Williams', 'Bryce Young',
-    'Lamar Jackson', 'Baker Mayfield', 'Kyler Murray', 'Marcus Mariota', 'Jameis Winston',
-    'Johnny Manziel', 'Cam Newton', 'Reggie Bush', 'Matt Leinart', 'Ricky Williams',
-    'Eddie George', 'Charlie Ward', 'Desmond Howard', 'Bo Jackson', 'Herschel Walker',
-  ],
-  cfb_teams: [
-    'Alabama Crimson Tide', 'Georgia Bulldogs', 'Michigan Wolverines', 'Ohio State Buckeyes',
-    'Texas Longhorns', 'Oklahoma Sooners', 'LSU Tigers', 'USC Trojans',
-    'Notre Dame Fighting Irish', 'Clemson Tigers', 'Florida Gators', 'Florida State Seminoles',
-    'Miami Hurricanes', 'Nebraska Cornhuskers', 'Penn State Nittany Lions', 'Tennessee Volunteers',
-    'Oregon Ducks', 'Washington Huskies', 'Auburn Tigers', 'Wisconsin Badgers',
-  ],
-  cbb_players: [
-    'Carmelo Anthony', 'Kemba Walker', 'Shabazz Napier', 'Magic Johnson', 'Kris Jenkins',
-    'Christian Laettner', 'Lorenzo Charles', 'Jalen Suggs', 'Anthony Davis', 'Emeka Okafor',
-    'Caitlin Clark', 'Glen Rice', 'Michael Jordan', 'Tyler Hansbrough', 'JJ Redick',
-    'Grant Hill', 'Shane Battier', 'Richard Hamilton', 'Jalen Brunson', 'Mikal Bridges',
-    'Zach Edey', 'Tristen Newton', 'Kyle Guy', 'Donte DiVincenzo', 'Joel Berry II',
-  ],
-  cbb_teams: [
-    'UCLA Bruins', 'Duke Blue Devils', 'North Carolina Tar Heels', 'Kentucky Wildcats',
-    'Kansas Jayhawks', 'UConn Huskies', 'Indiana Hoosiers', 'Villanova Wildcats',
-    'Michigan State Spartans', 'Louisville Cardinals', 'Gonzaga Bulldogs', 'Syracuse Orange',
-    'UMBC Retrievers', 'Fairleigh Dickinson Knights', "Saint Peter's Peacocks", 'Florida Gulf Coast Eagles',
-    'Loyola Chicago Ramblers', 'George Mason Patriots', 'Butler Bulldogs', 'VCU Rams',
-  ],
-  mlb_hitters: [
-    'Hank Aaron', 'Willie Mays', 'Ted Williams', 'Lou Gehrig', 'Jackie Robinson',
-    'Cal Ripken Jr.', 'Tony Gwynn', 'Ichiro Suzuki', 'Aaron Judge', 'Shohei Ohtani',
-    'Miguel Cabrera', 'Reggie Jackson', 'Babe Ruth', 'Mickey Mantle', 'Stan Musial',
-    'Joe DiMaggio', 'Ken Griffey Jr.', 'Derek Jeter', 'Albert Pujols', 'Barry Bonds',
-    'Alex Rodriguez', 'David Ortiz', 'Mike Trout', 'Mookie Betts', 'Bryce Harper',
-    'Pete Rose', 'Johnny Bench', 'Mike Schmidt', 'George Brett', 'Rickey Henderson',
-  ],
-  mlb_pitchers: [
-    'Nolan Ryan', 'Greg Maddux', 'Don Larsen', 'Bob Gibson', 'Mariano Rivera',
-    'Madison Bumgarner', 'Sandy Koufax', 'Randy Johnson', 'Pedro Martinez', 'Roger Clemens',
-    'Tom Seaver', 'Steve Carlton', 'Warren Spahn', 'Whitey Ford', 'Don Drysdale',
-    'John Smoltz', 'Tom Glavine', 'Clayton Kershaw', 'Max Scherzer', 'Justin Verlander',
-    'Jacob deGrom', 'Roy Halladay', 'Trevor Hoffman', 'Dennis Eckersley', 'Billy Wagner',
-  ],
-  nhl_skaters: [
-    'Wayne Gretzky', 'Mario Lemieux', 'Gordie Howe', 'Jaromir Jagr', 'Alex Ovechkin',
-    'Sidney Crosby', 'Connor McDavid', 'Teemu Selanne', 'Mark Messier', 'Steve Yzerman',
-    'Joe Sakic', 'Phil Esposito', 'Marcel Dionne', 'Brett Hull', 'Luc Robitaille',
-    'Bobby Orr', 'Nicklas Lidstrom', 'Ray Bourque', 'Denis Potvin', 'Paul Coffey',
-    'Nathan MacKinnon', 'Leon Draisaitl', 'Auston Matthews', 'Nikita Kucherov', 'Cale Makar',
-  ],
-  nhl_goalies: [
-    'Martin Brodeur', 'Patrick Roy', 'Dominik Hasek', 'Ken Dryden', 'Ed Belfour',
-    'Roberto Luongo', 'Henrik Lundqvist', 'Terry Sawchuk', 'Jacques Plante', 'Glenn Hall',
-    'Tony Esposito', 'Bernie Parent', 'Grant Fuhr', 'Billy Smith', 'Marc-Andre Fleury',
-    'Andrei Vasilevskiy', 'Carey Price', 'Miikka Kiprusoff', 'Curtis Joseph', 'Mike Richter',
-  ],
-  soccer_stars: [
-    'Lionel Messi', 'Cristiano Ronaldo', 'Pele', 'Diego Maradona', 'Zinedine Zidane',
-    'Ronaldo Nazario', 'Kylian Mbappe', 'Erling Haaland', 'Thierry Henry', 'Ronaldinho',
-    'Johan Cruyff', 'Luka Modric', 'Andres Iniesta', 'Xavi Hernandez', 'Neymar Jr',
-    'Kaka', 'David Beckham', 'Roberto Baggio', 'Marco van Basten', 'Gerd Muller',
-    'Robert Lewandowski', 'Karim Benzema', 'Harry Kane', 'Mohamed Salah', 'Kevin De Bruyne',
-  ],
-  soccer_clubs_nations: [
-    'Real Madrid', 'FC Barcelona', 'Manchester United', 'Liverpool FC', 'Bayern Munich',
-    'Paris Saint-Germain', 'AC Milan', 'Inter Milan', 'Juventus', 'Manchester City',
-    'Arsenal FC', 'Chelsea FC', 'Brazil', 'Argentina', 'Germany', 'Italy', 'France',
-    'Spain', 'England', 'Netherlands', 'Portugal', 'Uruguay', 'Croatia',
-  ],
-  global_legends: [
-    'Roger Federer', 'Rafael Nadal', 'Novak Djokovic', 'Serena Williams', 'Steffi Graf',
-    'Tiger Woods', 'Jack Nicklaus', 'Arnold Palmer', 'Phil Mickelson', 'Rory McIlroy',
-    'Usain Bolt', 'Michael Phelps', 'Carl Lewis', 'Jesse Owens', 'Simone Biles',
-    'Lewis Hamilton', 'Michael Schumacher', 'Ayrton Senna', 'Max Verstappen', 'Dale Earnhardt',
-  ],
 };
 
 // ===========================================================================
@@ -279,25 +162,14 @@ export function generateSmartDistractors(
     return Array.from(curatedSet);
   }
 
-  const candidateBanks: string[][] = [];
-
-  if (sport === 'NFL') {
-    candidateBanks.push(PEER_BANKS.nfl_qb, PEER_BANKS.nfl_rb, PEER_BANKS.nfl_wr_te, PEER_BANKS.nfl_defense, PEER_BANKS.nfl_teams, PEER_BANKS.nfl_coaches);
-  } else if (sport === 'NBA') {
-    candidateBanks.push(PEER_BANKS.nba_guards, PEER_BANKS.nba_forwards_bigs, PEER_BANKS.nba_teams);
-  } else if (sport === 'NCAA_FOOTBALL') {
-    candidateBanks.push(PEER_BANKS.cfb_players, PEER_BANKS.cfb_teams, PEER_BANKS.nfl_qb, PEER_BANKS.nfl_rb);
-  } else if (sport === 'NCAA_BASKETBALL') {
-    candidateBanks.push(PEER_BANKS.cbb_players, PEER_BANKS.cbb_teams, PEER_BANKS.nba_guards, PEER_BANKS.nba_forwards_bigs);
-  } else if (sport === 'MLB') {
-    candidateBanks.push(PEER_BANKS.mlb_hitters, PEER_BANKS.mlb_pitchers);
-  } else if (sport === 'NHL') {
-    candidateBanks.push(PEER_BANKS.nhl_skaters, PEER_BANKS.nhl_goalies);
-  } else if (sport === 'SOCCER') {
-    candidateBanks.push(PEER_BANKS.soccer_stars, PEER_BANKS.soccer_clubs_nations);
-  } else {
-    candidateBanks.push(PEER_BANKS.global_legends, PEER_BANKS.soccer_stars, PEER_BANKS.mlb_hitters);
-  }
+  const candidateBanks: string[][] = [
+    PEER_BANKS.nfl_qb,
+    PEER_BANKS.nfl_rb,
+    PEER_BANKS.nfl_wr_te,
+    PEER_BANKS.nfl_defense,
+    PEER_BANKS.nfl_teams,
+    PEER_BANKS.nfl_coaches,
+  ];
 
   for (const bank of candidateBanks) {
     const shuffled = fisherYatesShuffle(bank);
@@ -334,7 +206,7 @@ export interface CategorySpec {
 }
 
 // Import builder helper that creates deep 100+ cohorts per category
-import { ALL_16_CATEGORY_SPECS } from './triviaBankData';
+import { BUILT_IN_NFL_SPECS } from './triviaBankData';
 
 // ===========================================================================
 // RUNTIME QUESTION BANKS (THE GAME IS NFL ONLY)
@@ -385,7 +257,7 @@ export function getAllCompiledCategories(): TriviaCategory[] {
   if (COMPILED_CACHE) return COMPILED_CACHE;
   const result: TriviaCategory[] = [];
 
-  for (const spec of [...ALL_16_CATEGORY_SPECS, ...EXTERNAL_SPECS]) {
+  for (const spec of [...BUILT_IN_NFL_SPECS, ...EXTERNAL_SPECS]) {
     const clues: QuestionClue[] = [];
     const seenAnswersInCat = new Set<string>();
 

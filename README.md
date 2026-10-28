@@ -63,5 +63,5 @@ repo's **Settings → Pages**, set **Source** to **GitHub Actions**.
 
 ## Settings
 
-`game-config.json` holds the tuned timers and volumes, such as the question timer,
-buzzer delay and AI reflex speed.
+`game-config.json` holds the tuned settings: the question timer, the buzzer delay,
+the AI reflex speed and how close a typed answer must be.
