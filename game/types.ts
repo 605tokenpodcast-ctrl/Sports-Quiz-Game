@@ -33,6 +33,13 @@ export interface Contestant {
   finalAnswer?: string;
   finalCorrect?: boolean;
   sitsOutFinal?: boolean; // no money in the bank when the Final Showdown started
+  // For the end-of-game awards
+  fastBuzzMs?: number; // total buzz-in time on clues answered right
+  fastBuzzes?: number; // how many of those were timed
+  hardRight?: number; // right answers on the board's two toughest rows
+  hardTries?: number;
+  voiceRight?: number; // right answers given with the mic
+  voiceTries?: number;
 }
 
 /** The biggest single win of the match, for the recap. */
@@ -59,6 +66,7 @@ export interface ActiveClueState extends Countdown {
   clueIndex: number;
   phase: 'READING' | 'BUZZER_OPEN' | 'ANSWERING' | 'REVEALED';
   buzzedContestantId: ContestantId | null;
+  buzzMs?: number; // how long the buzzer was open before the current answerer pressed
   buzzerLockout: Record<ContestantId, boolean>;
   options: string[];
   isBonusWager: boolean;

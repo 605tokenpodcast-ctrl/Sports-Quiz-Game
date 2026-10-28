@@ -20,6 +20,7 @@ export default function ResultsOverlay() {
     activeContestantsList,
     openLeaderboardWithConfig,
     recapMomentsList,
+    recapAwardsList,
     shareRecap,
   } = useGame();
   return (
@@ -95,6 +96,21 @@ export default function ResultsOverlay() {
                   ))}
               </div>
             </div>
+
+            {/* Awards, also on the recap card */}
+            {recapAwardsList.length > 0 && (
+              <div className="w-full grid grid-cols-2 gap-1.5 mb-2.5">
+                {recapAwardsList.map((a) => (
+                  <div key={a.title} className="bg-slate-950/90 border border-amber-500/60 rounded-xl p-2 text-center">
+                    <div className="text-[10px] font-black text-amber-300 uppercase tracking-wider">
+                      {a.emoji} {a.title}
+                    </div>
+                    <div className="text-xs font-black text-white truncate">{a.winner}</div>
+                    <div className="text-[10px] text-slate-400">{a.detail}</div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Best moments, also on the recap card */}
             {recapMomentsList.length > 0 && (

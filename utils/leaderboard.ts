@@ -175,3 +175,83 @@ export function resetAllLeaderboards(): void {
     });
   });
 }
+
+// --- Backup -------------------------------------------------------------------------------
+// Leaderboards live in this browser only, so clearing site data wipes them. A backup file
+// keeps them safe and moves them to another device.
+
+const BOARD_PREFIX = 'sport_trivia_leaderboards_';
+const BACKUP_KIND = 'nfl-quiz-leaderboards';
+
+type KeyStore = Pick<Storage, 'getItem' | 'setItem' | 'key' | 'length'>;
+
+const isEntry = (e: unknown): e is LeaderboardEntry => {
+  const x = e as LeaderboardEntry;
+  return !!x && typeof x.id === 'string' && typeof x.playerName === 'string' && typeof x.score === 'number' && Number.isFinite(x.score);
+};
+
+const readBoard = (store: KeyStore, key: string): LeaderboardEntry[] => {
+  try {
+    const parsed = JSON.parse(store.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed.filter(isEntry) : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Every saved leaderboard on this device, as the text of a backup file. */
+export function leaderboardBackup(store: KeyStore = localStorage): string {
+  const boards: Record<string, LeaderboardEntry[]> = {};
+  for (let i = 0; i < store.length; i++) {
+    const key = store.key(i);
+    if (!key?.startsWith(BOARD_PREFIX)) continue;
+    const entries = readBoard(store, key);
+    if (entries.length) boards[key] = entries;
+  }
+  return JSON.stringify({kind: BACKUP_KIND, version: 1, savedAt: new Date().toISOString(), boards}, null, 2);
+}
+
+/**
+ * Adds a backup's scores to this device's leaderboards. Scores already here are kept, the same
+ * score is never added twice, and each board keeps its top 10. Throws if the file isn't a backup.
+ */
+export function restoreLeaderboardBackup(text: string, store: KeyStore = localStorage): {boards: number; added: number} {
+  let data: {kind?: string; boards?: Record<string, unknown>};
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('That file is not a leaderboard backup.');
+  }
+  if (data?.kind !== BACKUP_KIND || !data.boards || typeof data.boards !== 'object') {
+    throw new Error('That file is not a leaderboard backup.');
+  }
+  let boards = 0;
+  let added = 0;
+  for (const [key, list] of Object.entries(data.boards)) {
+    if (!key.startsWith(BOARD_PREFIX) || !Array.isArray(list)) continue;
+    const current = readBoard(store, key);
+    const have = new Set(current.map((e) => e.id));
+    const incoming = list.filter(isEntry).filter((e) => !have.has(e.id));
+    if (!incoming.length) continue;
+    const merged = [...current, ...incoming].sort((a, b) => b.score - a.score).slice(0, 10);
+    const kept = merged.filter((e) => !have.has(e.id)).length;
+    if (!kept) continue; // all too low for this board's top 10
+    added += kept;
+    store.setItem(key, JSON.stringify(merged));
+    boards++;
+  }
+  return {boards, added};
+}
+
+/** Saves the backup as a file in the browser's downloads. */
+export function downloadLeaderboardBackup(): void {
+  const blob = new Blob([leaderboardBackup()], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nfl-quiz-leaderboards-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}

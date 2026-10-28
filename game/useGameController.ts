@@ -21,7 +21,7 @@ import {
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
 import {isSpeechSupported, speak, spokenMoney, stopSpeaking, unlockSpeech} from '../utils/speech';
 import {drawRecapCard, shareRecapCard} from '../utils/recapCard';
-import {recapMoments} from './recap';
+import {recapAwards, recapMoments} from './recap';
 import {
   ActiveClueState,
   AIDifficulty,
@@ -63,6 +63,7 @@ import {
   resolveAnswer,
   resumeCountdown,
   scoreAnswer,
+  trackAnswer,
   startCountdown,
   TIMES,
 } from './rules';
@@ -363,7 +364,13 @@ export function useGameController() {
   activeClueRef.current = activeClue;
   // Host: changes to the open clue go through here, so a timer or network message handled
   // before the next render already sees the new clue.
+  // Host: when the buzzers last opened, to time how fast each buzz-in was (for Quick Draw).
+  const buzzersOpenedAtRef = useRef(0);
   const commitClue = (next: ActiveClueState | null) => {
+    const prev = activeClueRef.current;
+    if (next?.phase === 'BUZZER_OPEN' && (prev?.phase !== 'BUZZER_OPEN' || prev.clue.id !== next.clue.id)) {
+      buzzersOpenedAtRef.current = Date.now();
+    }
     activeClueRef.current = next;
     setActiveClue(next);
   };
@@ -441,6 +448,7 @@ export function useGameController() {
     return `${base}?room=${encodeURIComponent(roomCode)}&role=join`;
   }, [roomCode]);
   const streamScreenUrl = shareableJoinUrl.replace(/role=join$/, 'role=screen');
+  const greenScreenUrl = `${streamScreenUrl}&bg=green`;
 
   // Sync SDK lifecycle score with player's cash bankroll
   useEffect(() => {
@@ -545,7 +553,7 @@ export function useGameController() {
     }
     const match = matchSpokenOption(heard, activeClue.options);
     if (!match) return `Heard "${heard[0]}". Not sure which one you meant, so tap it.`;
-    submit(match);
+    submit(match, heard);
   };
 
   // Final Showdown answers are typed, so voice fills the box and the player checks it before submitting.
@@ -753,7 +761,7 @@ export function useGameController() {
   const pendingBuzzesRef = useRef<{id: ContestantId; at: number; clueId: string}[]>([]);
   const buzzWindowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const awardBuzz = (contestantId: ContestantId, clueId: string) => {
+  const awardBuzz = (contestantId: ContestantId, clueId: string, pressedAt = Date.now()) => {
     const current = activeClueRef.current;
     if (
       !current ||
@@ -781,6 +789,7 @@ export function useGameController() {
       ...startCountdown(seconds, Date.now()),
       phase: 'ANSWERING',
       buzzedContestantId: contestantId,
+      buzzMs: Math.max(0, pressedAt - buzzersOpenedAtRef.current),
       feedbackText: isAI
         ? `${name} buzzed in!`
         : answerMode === 'VOICE'
@@ -799,7 +808,7 @@ export function useGameController() {
 
     // Everyone on this device: first come, first served.
     if (Object.keys(remoteSeatsRef.current).length === 0) {
-      awardBuzz(contestantId, clueId);
+      awardBuzz(contestantId, clueId, pressedAt);
       return;
     }
 
@@ -813,7 +822,7 @@ export function useGameController() {
       pendingBuzzesRef.current = [];
       if (!entries.length) return;
       const first = entries.reduce((a, b) => (b.at < a.at ? b : a));
-      awardBuzzRef.current(first.id, first.clueId);
+      awardBuzzRef.current(first.id, first.clueId, first.at);
     }, BUZZ_WINDOW_MS);
   };
   const registerBuzzRef = useRef(registerBuzz);
@@ -860,7 +869,12 @@ export function useGameController() {
           : {...ms, playerWrong: ms.playerWrong + 1}
       );
     }
-    setContestants((c) => ({...c, [who]: scoreAnswer(c[who], stake, correct, prev.isBonusWager)}));
+    // Daily Doubles have no buzz race, so they don't count toward Quick Draw.
+    const awardHow = {buzzMs: prev.isBonusWager ? undefined : prev.buzzMs, byVoice: how.kind === 'player' && how.byVoice};
+    setContestants((c) => ({
+      ...c,
+      [who]: trackAnswer(scoreAnswer(c[who], stake, correct, prev.isBonusWager), correct, prev.clue, awardHow),
+    }));
 
     const name = contestantsRef.current[who]?.name || (how.kind === 'ai' ? 'Opponent' : 'Player');
     commitClue(resolveAnswer(prev, who, correct, how, {name, buzzerSeats, now: Date.now()}));
@@ -880,7 +894,7 @@ export function useGameController() {
     const isCorrect = isOpenAnswerMode(answerMode)
       ? checkTypedAnswer(answer, current.clue, threshold)
       : answer.trim().toLowerCase() === current.clue.correctAnswer.trim().toLowerCase();
-    applyAnswer(answeringId, isCorrect, {kind: 'player', answer});
+    applyAnswer(answeringId, isCorrect, {kind: 'player', answer, byVoice: spokenGuesses !== undefined});
   };
 
   // P2P Message Dispatcher for Host & Client
@@ -1766,6 +1780,10 @@ export function useGameController() {
     () => recapMoments(activeContestantsList.map((id) => contestants[id]), bigPlay, finalClue?.correctAnswer),
     [activeContestantsList, contestants, bigPlay, finalClue?.correctAnswer]
   );
+  const recapAwardsList = useMemo(
+    () => recapAwards(activeContestantsList.map((id) => contestants[id])),
+    [activeContestantsList, contestants]
+  );
   const shareRecap = useCallback(async () => {
     const formats: Record<AnswerMode, string> = {STANDARD: '4-Choice', HARD: '8-Choice', EXPERT: 'Typed', VOICE: 'Mic Only'};
     const vsAI = activeContestantsList.includes('coach') ? ' · vs. AI' : '';
@@ -1774,6 +1792,7 @@ export function useGameController() {
       const canvas = drawRecapCard({
         standings: activeContestantsList.map((id) => contestants[id]).sort((a, b) => b.score - a.score),
         moments: recapMomentsList,
+        awards: recapAwardsList,
         mode: `${gameLength === 'SHORT' ? 'Short' : 'Full'} Game · ${formats[answerMode]} · ${level}${vsAI}`,
         date: new Date(),
         url: `${window.location.origin}${window.location.pathname}`,
@@ -1783,7 +1802,7 @@ export function useGameController() {
     } catch {
       showToast('Could not make the recap card on this device.');
     }
-  }, [activeContestantsList, contestants, recapMomentsList, difficulty, gameLength, answerMode, showToast]);
+  }, [activeContestantsList, contestants, recapMomentsList, recapAwardsList, difficulty, gameLength, answerMode, showToast]);
 
   // Copy Room Link to Clipboard
   const handleCopyInviteLink = useCallback(() => {
@@ -1957,8 +1976,10 @@ export function useGameController() {
     setReadAloud,
     screenCount,
     streamScreenUrl,
+    greenScreenUrl,
     bigPlay,
     recapMomentsList,
+    recapAwardsList,
     shareRecap,
     handleContestantBuzz,
     handleContestantSubmitAnswer,

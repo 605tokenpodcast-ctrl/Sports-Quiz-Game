@@ -129,11 +129,37 @@ export function scoreAnswer(c: Contestant, amount: number, correct: boolean, isB
     : {...c, score: c.score - amount, reaction: 'wrong', wrongCount: c.wrongCount + 1};
 }
 
+/** The clue difficulty (1 to 5) from which a right answer counts toward NFL Historian. */
+export const HARD_CLUE_DIFFICULTY = 4;
+
+/** Adds one answer to a contestant's award stats. */
+export function trackAnswer(
+  c: Contestant,
+  correct: boolean,
+  clue: {difficulty: number},
+  how: {buzzMs?: number; byVoice?: boolean}
+): Contestant {
+  const next = {...c};
+  if (correct && how.buzzMs !== undefined) {
+    next.fastBuzzMs = (c.fastBuzzMs || 0) + how.buzzMs;
+    next.fastBuzzes = (c.fastBuzzes || 0) + 1;
+  }
+  if (clue.difficulty >= HARD_CLUE_DIFFICULTY) {
+    next.hardTries = (c.hardTries || 0) + 1;
+    if (correct) next.hardRight = (c.hardRight || 0) + 1;
+  }
+  if (how.byVoice) {
+    next.voiceTries = (c.voiceTries || 0) + 1;
+    if (correct) next.voiceRight = (c.voiceRight || 0) + 1;
+  }
+  return next;
+}
+
 /** What a clue is worth to the player answering it. */
 export const clueStake = (clue: ActiveClueState) => (clue.isBonusWager ? clue.bonusWagerInput : clue.clue.value);
 
 export type AnswerHow =
-  | {kind: 'player'; answer: string} // a person picked or typed an answer
+  | {kind: 'player'; answer: string; byVoice?: boolean} // a person picked, typed or said an answer
   | {kind: 'ai'; answer: string} // an AI player said an answer
   | {kind: 'timeout'}; // the answer clock ran out
 

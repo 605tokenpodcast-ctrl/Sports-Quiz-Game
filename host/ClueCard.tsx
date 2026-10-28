@@ -264,8 +264,8 @@ export default function ClueCard() {
                       size="large"
                       label="SAY YOUR ANSWER"
                       onHeard={(heard) =>
-                        answerByVoice(heard, (answer) =>
-                          handleContestantSubmitAnswer(answer, activeClue.buzzedContestantId as 'player' | 'player2')
+                        answerByVoice(heard, (answer, guesses) =>
+                          handleContestantSubmitAnswer(answer, activeClue.buzzedContestantId as 'player' | 'player2', guesses)
                         )
                       }
                     />
@@ -336,8 +336,8 @@ export default function ClueCard() {
                     <VoiceAnswerButton
                       key={`${activeClue.clue.id}-${activeClue.buzzedContestantId}`}
                       onHeard={(heard) =>
-                        answerByVoice(heard, (answer) =>
-                          handleContestantSubmitAnswer(answer, activeClue.buzzedContestantId as 'player' | 'player2')
+                        answerByVoice(heard, (answer, guesses) =>
+                          handleContestantSubmitAnswer(answer, activeClue.buzzedContestantId as 'player' | 'player2', guesses)
                         )
                       }
                     />

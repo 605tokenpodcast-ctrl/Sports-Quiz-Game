@@ -18,7 +18,9 @@ import {
   scoreAnswer,
   startCountdown,
   TIMES,
+  trackAnswer,
 } from '../game/rules';
+import {recapAwards} from '../game/recap';
 import type {ActiveClueState, Contestant, ContestantId} from '../game/types';
 
 let failed = 0;
@@ -155,6 +157,40 @@ check('reading a clue aloud holds the buzzers until it is read', () => {
   const secs = readingSeconds(clue, 3.6);
   assert.ok(secs > 5 && secs < 8, `about 6 seconds for a 17-word clue, got ${secs}`);
   assert.equal(readingSeconds('word '.repeat(200), 3.6), 15);
+});
+
+const person = (id: ContestantId, name: string, extra: Partial<Contestant> = {}): Contestant => ({
+  id, name, shortName: name, title: '', score: 0, reaction: 'idle', correctCount: 0, wrongCount: 0, wager: 0, ...extra,
+});
+
+check('answers add up toward the awards', () => {
+  let c = person('player', 'Ann');
+  c = trackAnswer(c, true, {difficulty: 5}, {buzzMs: 800, byVoice: true});
+  c = trackAnswer(c, false, {difficulty: 4}, {buzzMs: 300, byVoice: true});
+  c = trackAnswer(c, true, {difficulty: 2}, {buzzMs: 1200});
+  assert.equal(c.fastBuzzMs, 2000, 'only right answers count toward buzz speed');
+  assert.equal(c.fastBuzzes, 2);
+  assert.deepEqual([c.hardRight, c.hardTries], [1, 2]);
+  assert.deepEqual([c.voiceRight, c.voiceTries], [1, 2]);
+});
+
+check('awards go to the right players and skip thin samples', () => {
+  const ann = person('player', 'Ann', {fastBuzzMs: 1500, fastBuzzes: 3, hardRight: 3, hardTries: 4, voiceRight: 4, voiceTries: 5});
+  const bo = person('player2', 'Bo', {fastBuzzMs: 1200, fastBuzzes: 3, hardRight: 1, hardTries: 4, finalCorrect: true, wager: 900});
+  const cy = person('analyst', 'Cy', {fastBuzzMs: 100, fastBuzzes: 1, finalCorrect: false, wager: 2000});
+  const awards = Object.fromEntries(recapAwards([ann, bo, cy]).map((a) => [a.title, a]));
+  assert.equal(awards['Quick Draw'].winner, 'Bo', 'one fast buzz is not enough');
+  assert.equal(awards['Quick Draw'].detail, '0.40s average buzz');
+  assert.equal(awards['Clutch Gene'].winner, 'Bo');
+  assert.equal(awards['NFL Historian'].winner, 'Ann');
+  assert.equal(awards['Voice Sniper'].detail, '80% with the mic');
+  assert.deepEqual(recapAwards([person('player', 'Dee')]), [], 'a quiet game gives no awards');
+});
+
+check('tied awards name everyone', () => {
+  const a = person('player', 'Ann', {fastBuzzMs: 1000, fastBuzzes: 2});
+  const b = person('player2', 'Bo', {fastBuzzMs: 1000, fastBuzzes: 2});
+  assert.equal(recapAwards([a, b])[0].winner, 'Ann and Bo');
 });
 
 if (failed) process.exit(1);
