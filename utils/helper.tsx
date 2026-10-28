@@ -1,5 +1,5 @@
-// Shared UI helpers: focus, menu overlay, sound effects and mobile detection.
-import React, {useEffect, useRef, useState} from 'react';
+// Shared UI helpers: focus, menu overlay and sound effects.
+import React, {useEffect, useRef} from 'react';
 
 type OverlayTone = 'neutral' | 'danger' | 'victory';
 
@@ -362,36 +362,4 @@ export interface GameState {
   status: GamePhase;
   score: number;
   level: number;
-}
-
-/** Detect phones and tablets (touch, small screen, or mobile user agent). */
-export function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    const ua =
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-        navigator.userAgent,
-      );
-    const touch =
-      window.matchMedia('(pointer: coarse)').matches ||
-      'ontouchstart' in window ||
-      navigator.maxTouchPoints > 0;
-    const small = window.innerWidth < 768;
-    return ua || touch || small;
-  });
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(
-        window.innerWidth < 768 ||
-          window.matchMedia('(pointer: coarse)').matches ||
-          'ontouchstart' in window ||
-          navigator.maxTouchPoints > 0,
-      );
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  return isMobile;
 }

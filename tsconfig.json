@@ -11,5 +11,5 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["*.ts", "*.tsx", "utils", "scripts", "tests"]
+  "include": ["*.ts", "*.tsx", "game", "host", "phone", "ui", "utils", "scripts", "tests"]
 }

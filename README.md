@@ -20,10 +20,13 @@ Daily Double) to play a short game while testing.
 
 ## Code layout
 
-- `App.tsx`: the game screens and the host's game flow.
-- `game/`: shared types and the game rules (clocks, scoring, wagers) as plain functions.
+- `App.tsx`: picks the host studio or the phone controller and lays out the host screen.
+- `game/useGameController.ts`: all game state and flow (the host runs the game; phones keep a copy).
+- `game/rules.ts`, `game/types.ts`: the game rules (clocks, scoring, wagers) as plain functions, and shared types.
+- `host/`: the host screen's parts (scoreboard, board and Final, clue card, menus, leaderboards, results).
+- `phone/PhoneScreen.tsx`: a friend's phone.
 - `triviaData.ts`, `triviaEngine.ts`: loading questions, building boards, checking answers.
-- `utils/`: multiplayer connection, voice answers, sounds, leaderboard and other helpers.
+- `utils/`, `ui/`: multiplayer connection, voice answers, sounds, leaderboard and other helpers.
 
 ## Questions
 
