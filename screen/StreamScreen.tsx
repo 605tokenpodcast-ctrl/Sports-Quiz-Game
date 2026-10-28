@@ -1,6 +1,6 @@
 // The stream screen: a big-screen view of the game for a laptop or TV on the stream or recording.
 // It only watches. The host device runs the game and everyone plays from their phones.
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {Trophy, Zap, Clock, Flame, Star, Lock, Volume2, VolumeX, Music, Megaphone, Tv, Share2} from 'lucide-react';
 import BackgroundMusic from '../utils/BackgroundMusic';
 import TimeLeft from '../utils/TimeLeft';
@@ -11,6 +11,22 @@ import type {ContestantId} from '../game/types';
 import {useGame} from '../game/GameContext';
 
 const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString()}`;
+
+/**
+ * `&bg=green` puts the game on a chroma-key green for StreamYard, Zoom or a camera app to key
+ * out, and `&bg=transparent` leaves it see-through for an OBS browser source.
+ */
+export type StreamBackdrop = 'normal' | 'green' | 'transparent';
+export const CHROMA_GREEN = '#00b140';
+function streamBackdrop(): StreamBackdrop {
+  if (typeof window === 'undefined') return 'normal';
+  const bg = (
+    new URLSearchParams(window.location.search).get('bg') ||
+    new URLSearchParams(window.location.hash.replace(/^#/, '')).get('bg') ||
+    ''
+  ).toLowerCase();
+  return bg === 'green' ? 'green' : bg === 'transparent' || bg === 'none' ? 'transparent' : 'normal';
+}
 
 export default function StreamScreen() {
   const game = useGame();
@@ -45,11 +61,24 @@ export default function StreamScreen() {
   const board = currentRound === 'ROUND_1' ? round1Board : round2Board;
   const playing = gameState.status === 'PLAYING';
   const over = gameState.status === 'VICTORY' || gameState.status === 'GAME_OVER';
+  const [backdrop] = useState(streamBackdrop);
+  const keyed = backdrop !== 'normal';
+  const keyColor = backdrop === 'green' ? CHROMA_GREEN : 'transparent';
+
+  // The page behind the game has to match, or it shows at the edges.
+  useEffect(() => {
+    if (!keyed) return;
+    document.documentElement.style.background = keyColor;
+    document.body.style.background = keyColor;
+  }, [keyed, keyColor]);
 
   return (
-    <div className="fixed inset-0 overflow-hidden flex flex-col bg-slate-950 text-white font-sans select-none">
+    <div
+      className={`fixed inset-0 overflow-hidden flex flex-col text-white font-sans select-none ${keyed ? '' : 'bg-slate-950'}`}
+      style={keyed ? {background: keyColor} : undefined}
+      data-backdrop={backdrop}>
       <BackgroundMusic url={activeBgmUrl} isPlaying={started && playing && !musicMuted} isMuted={musicMuted} />
-      <div className="absolute inset-0 z-0 bg-gradient-to-b from-blue-950 via-slate-950 to-slate-950 pointer-events-none" />
+      {!keyed && <div className="absolute inset-0 z-0 bg-gradient-to-b from-blue-950 via-slate-950 to-slate-950 pointer-events-none" />}
 
       {!started && (
         <button
@@ -74,7 +103,10 @@ export default function StreamScreen() {
       )}
 
       {/* Header: title, round, sound controls and the join code */}
-      <header className="relative z-10 shrink-0 flex items-center justify-between gap-4 px-6 py-3 bg-slate-900/90 border-b-2 border-amber-500/60">
+      <header
+        className={`relative z-10 shrink-0 flex items-center justify-between gap-4 px-6 py-3 border-b-2 border-amber-500/60 ${
+          keyed ? 'bg-slate-900' : 'bg-slate-900/90'
+        }`}>
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center">
             <Trophy className="w-7 h-7 text-slate-950" />
@@ -386,7 +418,7 @@ function FinalPanel() {
 }
 
 function Results() {
-  const {contestants, activeContestantsList, recapMomentsList, shareRecap} = useGame();
+  const {contestants, activeContestantsList, recapMomentsList, recapAwardsList, shareRecap} = useGame();
   const standings = activeContestantsList.map((id) => contestants[id]).sort((a, b) => b.score - a.score);
   const winners = standings.filter((c) => c.score === standings[0]?.score);
   return (
@@ -405,6 +437,18 @@ function Results() {
           </div>
         ))}
       </div>
+      {recapAwardsList.length > 0 && (
+        <div className="w-full grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {recapAwardsList.map((a) => (
+            <div key={a.title} className="bg-slate-950/80 border-2 border-amber-500/70 rounded-2xl px-3 py-3 flex flex-col items-center">
+              <div className="text-4xl">{a.emoji}</div>
+              <div className="text-lg font-black text-amber-400 uppercase">{a.title}</div>
+              <div className="text-2xl font-black text-white">{a.winner}</div>
+              <div className="text-base text-slate-300">{a.detail}</div>
+            </div>
+          ))}
+        </div>
+      )}
       {recapMomentsList.length > 0 && (
         <div className="w-full text-left text-xl lg:text-2xl text-slate-200 flex flex-col gap-1">
           {recapMomentsList.map((m) => (

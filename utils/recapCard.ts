@@ -1,11 +1,12 @@
 // The end-of-game recap card: a 1080 x 1350 image (the size social apps show in full) with the
 // final standings and best moments, drawn on a canvas and shared or saved as a PNG.
 import type {Contestant} from '../game/types';
-import {recapMoney} from '../game/recap';
+import {recapMoney, type RecapAward} from '../game/recap';
 
 export interface RecapCardData {
   standings: Contestant[]; // highest score first
   moments: string[];
+  awards?: RecapAward[];
   mode: string; // e.g. "Full Game · 4-Choice · Medium"
   date: Date;
   url: string;
@@ -77,36 +78,63 @@ export function drawRecapCard(data: RecapCardData): HTMLCanvasElement {
   fit(ctx, `🏆 ${headline}`, 900, 76, W - 140);
   ctx.fillText(`🏆 ${headline}`, W / 2, 345);
 
-  // Standings
+  // Standings, a little tighter when there are awards to fit
+  const awards = data.awards ?? [];
+  const rowH = awards.length ? 90 : 110;
   const medals = ['#fbbf24', '#cbd5e1', '#d97706'];
   let y = 420;
   data.standings.forEach((c, i) => {
     ctx.fillStyle = i === 0 ? 'rgba(245, 158, 11, 0.18)' : 'rgba(30, 58, 138, 0.35)';
     if (ctx.roundRect) {
       ctx.beginPath();
-      ctx.roundRect(90, y, W - 180, 110, 22);
+      ctx.roundRect(90, y, W - 180, rowH, 22);
       ctx.fill();
     } else {
-      ctx.fillRect(90, y, W - 180, 110);
+      ctx.fillRect(90, y, W - 180, rowH);
     }
+    const mid = y + rowH / 2 + 18;
     ctx.textAlign = 'left';
     ctx.fillStyle = medals[i] ?? '#94a3b8';
     ctx.font = `900 54px ${FONT}`;
-    ctx.fillText(`#${i + 1}`, 130, y + 74);
+    ctx.fillText(`#${i + 1}`, 130, mid);
     ctx.fillStyle = '#f8fafc';
     fit(ctx, c.name, 800, 46, 520);
-    ctx.fillText(c.name, 240, y + 72);
+    ctx.fillText(c.name, 240, mid - 2);
     ctx.textAlign = 'right';
     ctx.fillStyle = c.score >= 0 ? '#34d399' : '#fb7185';
     ctx.font = `900 50px ${FONT}`;
-    ctx.fillText(recapMoney(c.score), W - 130, y + 74);
-    y += 130;
+    ctx.fillText(recapMoney(c.score), W - 130, mid);
+    y += rowH + 20;
   });
 
-  // Best moments
+  // Awards, two to a row
   ctx.textAlign = 'center';
+  if (awards.length) {
+    y += 50;
+    ctx.fillStyle = '#fbbf24';
+    ctx.font = `900 38px ${FONT}`;
+    ctx.fillText('AWARDS', W / 2, y);
+    y += 25;
+    const boxW = (W - 180 - 20) / 2;
+    const boxH = 95;
+    awards.forEach((a, i) => {
+      const x = 90 + (i % 2) * (boxW + 20);
+      const top = y + Math.floor(i / 2) * (boxH + 15);
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.14)';
+      ctx.fillRect(x, top, boxW, boxH);
+      ctx.fillStyle = '#fcd34d';
+      fit(ctx, `${a.emoji} ${a.title.toUpperCase()}: ${a.winner}`, 800, 30, boxW - 30);
+      ctx.fillText(`${a.emoji} ${a.title.toUpperCase()}: ${a.winner}`, x + boxW / 2, top + 42);
+      ctx.fillStyle = '#cbd5e1';
+      fit(ctx, a.detail, 500, 26, boxW - 30);
+      ctx.fillText(a.detail, x + boxW / 2, top + 78);
+    });
+    y += Math.ceil(awards.length / 2) * (boxH + 15) - 15;
+  }
+
+  // Best moments
   y += 50;
-  if (data.moments.length) {
+  if (data.moments.length && y < H - 200) {
     ctx.fillStyle = '#fbbf24';
     ctx.font = `900 38px ${FONT}`;
     ctx.fillText('BEST MOMENTS', W / 2, y);

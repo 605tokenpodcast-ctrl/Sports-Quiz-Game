@@ -1,13 +1,16 @@
 // This device's leaderboards, with filters.
-import {Play, Trophy, User, Medal, Filter, Trash2, Edit3} from 'lucide-react';
+import {useRef} from 'react';
+import {Play, Trophy, User, Medal, Filter, Trash2, Edit3, Download, Upload} from 'lucide-react';
 import {gameAudio, MenuOverlay} from '../utils/helper';
 import {AIDifficulty, AnswerMode} from '../game/types';
 import {
+  downloadLeaderboardBackup,
   FORMAT_OPTIONS,
   LENGTH_OPTIONS,
   OPPONENT_OPTIONS,
   resetAllLeaderboards,
   resetLeaderboardCategory,
+  restoreLeaderboardBackup,
   TIER_OPTIONS,
 } from '../utils/leaderboard';
 import {useGame} from '../game/GameContext';
@@ -37,6 +40,19 @@ export default function LeaderboardModal() {
     displayedLeaderboardEntries,
     myBestRecord,
   } = useGame();
+  const backupInputRef = useRef<HTMLInputElement>(null);
+
+  const restoreBackup = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const {added} = restoreLeaderboardBackup(await file.text());
+      setLeaderboardRefreshCounter((c) => c + 1);
+      showToast(added ? `✓ Restored ${added} score${added === 1 ? '' : 's'} from the backup` : 'Those scores are already here');
+    } catch (e) {
+      showToast((e as Error).message || 'Could not read that backup.');
+    }
+  };
+
   return (
     <>
       {isLeaderboardOpen && (
@@ -268,6 +284,38 @@ export default function LeaderboardModal() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Backup: leaderboards live in this browser only */}
+            <div className="flex flex-wrap items-center gap-2 mb-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+              <span className="text-[11px] text-slate-400 flex-1 min-w-[160px]">
+                Scores are saved in this browser only. Keep a backup so clearing it doesn't wipe them.
+              </span>
+              <button
+                onClick={() => {
+                  downloadLeaderboardBackup();
+                  showToast('✓ Leaderboard backup saved to your downloads');
+                }}
+                className="min-h-[40px] px-3 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-100 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                <Download className="w-3.5 h-3.5" />
+                <span>Save Backup</span>
+              </button>
+              <button
+                onClick={() => backupInputRef.current?.click()}
+                className="min-h-[40px] px-3 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-100 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                <Upload className="w-3.5 h-3.5" />
+                <span>Restore Backup</span>
+              </button>
+              <input
+                ref={backupInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => {
+                  restoreBackup(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
+              />
             </div>
 
             {/* Bottom Actions: Play This Config & Reset Records */}

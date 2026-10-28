@@ -24,6 +24,7 @@ export default function InviteModal() {
     handleCopyInviteLink,
     handleCopyRoomCode,
     streamScreenUrl,
+    greenScreenUrl,
     screenCount,
   } = useGame();
   return (
@@ -193,6 +194,32 @@ export default function InviteModal() {
                   </button>
                   <a
                     href={streamScreenUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-lg flex items-center gap-1">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open</span>
+                  </a>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-tight mt-1">
+                  Putting the game over your camera? The green screen link shows the game on solid green for StreamYard,
+                  Zoom or OBS to key out. In OBS you can also add it as a Browser Source with <code>bg=transparent</code> instead
+                  of <code>bg=green</code>.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      navigator.clipboard
+                        .writeText(greenScreenUrl)
+                        .then(() => showToast('✓ Green screen link copied!'))
+                        .catch(() => showToast(greenScreenUrl))
+                    }
+                    className="flex-1 py-2 px-3 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5">
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>COPY GREEN SCREEN LINK</span>
+                  </button>
+                  <a
+                    href={greenScreenUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-lg flex items-center gap-1">
