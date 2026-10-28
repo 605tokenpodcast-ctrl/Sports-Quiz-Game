@@ -20,6 +20,9 @@ const expected: Record<'FULL' | 'SHORT', { cats: number; r1: number[]; r2: numbe
   SHORT: { cats: 5, r1: [500, 1000, 1500], r2: [1000, 2000, 3000] },
 };
 
+const season = T.getActiveCategories().find((c) => c.id === T.CURRENT_CATEGORY_IDS.ROUND_2);
+const seasonAnswers = new Set(season?.clues.map((q) => T.normalizeAnswer(q.correctAnswer))).size;
+
 for (const length of ['FULL', 'SHORT'] as const) {
   for (let g = 0; g < 20; g++) {
     const s = T.createFullGameSession('MEDIUM', length);
@@ -30,8 +33,13 @@ for (const length of ['FULL', 'SHORT'] as const) {
     for (const cat of s.round2Board) assert.deepEqual(cat.clues.map((c) => c.value), want.r2);
     const ids = [...s.round1Board, ...s.round2Board].flatMap((c) => c.clues.map((q) => q.id));
     assert.equal(new Set(ids).size, ids.length, 'no question repeats in a game');
+    assert.ok(s.round1Board.some((c) => c.id === T.CURRENT_CATEGORY_IDS.ROUND_1), `${length} round 1 has This Week in the NFL`);
+    // Early in a season there may not be enough season-so-far questions for a column yet.
+    if (seasonAnswers >= want.r2.length) {
+      assert.ok(s.round2Board.some((c) => c.id === T.CURRENT_CATEGORY_IDS.ROUND_2), `${length} round 2 has the season so far`);
+    }
   }
   const { cats, r1, r2 } = expected[length];
   const pot = cats * (r1.reduce((a, b) => a + b) + r2.reduce((a, b) => a + b));
-  console.log(`ok   ${length.toLowerCase()} game: ${cats} categories x ${r1.length} clues, $${pot.toLocaleString()} on the boards`);
+  console.log(`ok   ${length.toLowerCase()} game: ${cats} categories x ${r1.length} clues, $${pot.toLocaleString()} on the boards, current columns every time`);
 }

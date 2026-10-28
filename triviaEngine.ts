@@ -439,7 +439,8 @@ export function generateBoardForRound(
   usedCategoryIds: Set<string>,
   usedQuestionIds: Set<string>,
   usedAnswers: Set<string>,
-  gameLength: GameLength = 'FULL'
+  gameLength: GameLength = 'FULL',
+  featuredCategoryId?: string
 ): TriviaCategory[] {
   const allCategories = getActiveCategories();
   const seen = getSeenQuestionIds();
@@ -455,6 +456,10 @@ export function generateBoardForRound(
     ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) >= ladderSize)),
     ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) < ladderSize)),
   ];
+  // The featured category (this week's games) is tried first so it makes the board even
+  // when this device has seen it all, then dropped into a random column below.
+  const featuredIdx = shuffledAvailable.findIndex((c) => c.id === featuredCategoryId);
+  if (featuredIdx > 0) shuffledAvailable.unshift(...shuffledAvailable.splice(featuredIdx, 1));
 
   const selectedBoard: TriviaCategory[] = [];
 
@@ -541,6 +546,10 @@ export function generateBoardForRound(
     }
   }
 
+  if (selectedBoard[0]?.id === featuredCategoryId) {
+    const column = Math.floor(Math.random() * selectedBoard.length);
+    [selectedBoard[0], selectedBoard[column]] = [selectedBoard[column], selectedBoard[0]];
+  }
   return selectedBoard;
 }
 
