@@ -53,11 +53,6 @@ import {
   useIsMobile,
 } from './utils/helper';
 import {
-  usePlayground,
-  usePlaygroundGameLifecycle,
-  useRpc,
-} from './utils/usePlayground';
-import {
   buildQuestionOptions,
   checkTypedAnswer,
   createFullGameSession,
@@ -106,6 +101,12 @@ export type AIDifficulty = 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT';
 export type AnswerMode = 'STANDARD' | 'HARD' | 'EXPERT'; // 4-choice, 8-choice, Typed
 export type RoundType = 'ROUND_1' | 'CHAMPIONSHIP' | 'FINAL_SHOWDOWN' | 'RESULTS';
 export type ContestantId = 'coach' | 'player' | 'analyst' | 'player2';
+
+// Seats a friend's phone can take. The third seat is the AI analyst ("Stats Riley")
+// unless a second friend joins online, in which case that friend plays it as P3.
+export type RemoteSeat = 'player2' | 'analyst';
+const REMOTE_SEATS: RemoteSeat[] = ['player2', 'analyst'];
+const seatLabel = (seat: ContestantId) => (seat === 'analyst' ? 'P3' : seat === 'player2' ? 'P2' : 'P1');
 export type DeviceRole = 'HOST' | 'CLIENT';
 
 interface Contestant {
@@ -208,8 +209,6 @@ function QRCodeView({ value, size = 180 }: { value: string; size?: number }) {
 
 export default function App() {
   const isMobile = useIsMobile();
-  const {sdk} = usePlayground();
-  const [exitChat] = useRpc<Record<string, unknown>, void>('ExitChat');
   const {assets, isReady: assetsReady} = useAssets(ASSETS_MANIFEST);
 
   // Audio mute controls: Music MUST be OFF by default, SFX MUST be ON by default
@@ -375,6 +374,8 @@ export default function App() {
   const [finalShowdownTimer, setFinalShowdownTimer] = useState(25);
   const [finalPlayerInput, setFinalPlayerInput] = useState('');
   const [finalPlayer2Input, setFinalPlayer2Input] = useState('');
+  const [player3FinalWager, setPlayer3FinalWager] = useState(1000);
+  const [finalPlayer3Input, setFinalPlayer3Input] = useState('');
 
   // Match statistics for post-game
   const [matchStats, setMatchStats] = useState({
@@ -391,6 +392,15 @@ export default function App() {
 
   // P2P Manager Ref
   const p2pRef = useRef<P2PConnectionManager | null>(null);
+
+  // Host: which seat each friend's phone holds, by PeerJS id. Client: the seat this phone holds.
+  const [remoteSeats, setRemoteSeats] = useState<Record<string, RemoteSeat>>({});
+  const remoteSeatsRef = useRef(remoteSeats);
+  const [mySeat, setMySeat] = useState<RemoteSeat>('player2');
+  const player3Human = Object.values(remoteSeats).includes('analyst');
+  const isHumanSeat = (id: ContestantId) => id === 'player' || id === 'player2' || (id === 'analyst' && player3Human);
+  const playerNameRef = useRef(playerName);
+  playerNameRef.current = playerName;
 
   // Toast notification helper
   const showToast = useCallback((msg: string) => {
@@ -468,7 +478,6 @@ export default function App() {
     }));
   }, [contestants.player.score, currentRound]);
 
-  usePlaygroundGameLifecycle(gameState, sdk);
 
   // Generate a fresh unique room code
   const generateRoomCode = useCallback(() => {
@@ -557,7 +566,7 @@ export default function App() {
 
       // AI Smart Wager Calculation
       let aiWager = 500;
-      if (isBonus && (pickerId === 'coach' || pickerId === 'analyst')) {
+      if (isBonus && !isHumanSeat(pickerId)) {
         const acc = pickerId === 'coach' ? aiConfig.coachAcc : aiConfig.analystAcc;
         if (acc > 0.8) {
           aiWager = Math.floor(maxWager * 0.9);
@@ -586,7 +595,7 @@ export default function App() {
         isBonusWager: isBonus,
         bonusSelectingPlayerId: pickerId,
         bonusWagerInput: isBonus
-          ? pickerId === 'player' || pickerId === 'player2'
+          ? isHumanSeat(pickerId)
             ? Math.min(roundMaxClue, maxWager)
             : aiWager
           : clue.value,
@@ -594,7 +603,7 @@ export default function App() {
         selectedOption: null,
         typedInput: '',
         feedbackText: isBonus
-          ? pickerId === 'player' || pickerId === 'player2'
+          ? isHumanSeat(pickerId)
             ? `★ DAILY DOUBLE! (${contestants[pickerId].name}) Enter your strategic wager!`
             : `★ DAILY DOUBLE! ${contestants[pickerId].name} is placing their wager...`
           : 'Host is reading clue...',
@@ -609,7 +618,7 @@ export default function App() {
         player2: {...prev.player2, reaction: isBonus && pickerId === 'player2' ? 'answering' : 'idle'},
       }));
     },
-    [activeClue, currentRound, round1Board, round2Board, answeredClueIds, activeSelector, contestants, answerMode, aiConfig]
+    [activeClue, currentRound, round1Board, round2Board, answeredClueIds, activeSelector, contestants, answerMode, aiConfig, player3Human]
   );
 
   // Automatic AI Wager Announcement & Reveal for Daily Doubles
@@ -625,6 +634,7 @@ export default function App() {
 
     const pickerId = activeClue.bonusSelectingPlayerId;
     if (pickerId !== 'coach' && pickerId !== 'analyst') return;
+    if (pickerId === 'analyst' && player3Human) return;
 
     const timer = setTimeout(() => {
       setActiveClue((prev) => {
@@ -642,7 +652,7 @@ export default function App() {
     }, 1800);
 
     return () => clearTimeout(timer);
-  }, [deviceRole, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, activeClue?.bonusSelectingPlayerId, contestants]);
+  }, [deviceRole, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, activeClue?.bonusSelectingPlayerId, contestants, player3Human]);
 
   // Initialize and start match
   const startMatch = useCallback(() => {
@@ -654,7 +664,7 @@ export default function App() {
     setAiThinkingStatus(null);
     setHighScoreCelebration(null);
 
-    setContestants({
+    setContestants((prev) => ({
       coach: {
         id: 'coach',
         name: 'Coach Dave',
@@ -679,9 +689,9 @@ export default function App() {
       },
       analyst: {
         id: 'analyst',
-        name: 'Stats Riley',
-        shortName: 'Riley',
-        title: 'Analytics Guru',
+        name: player3Human ? prev.analyst.name : 'Stats Riley',
+        shortName: player3Human ? 'P3' : 'Riley',
+        title: player3Human ? 'Online Challenger' : 'Analytics Guru',
         score: 0,
         reaction: 'idle',
         correctCount: 0,
@@ -690,7 +700,7 @@ export default function App() {
       },
       player2: {
         id: 'player2',
-        name: isClientConnected ? 'Friend (P2)' : 'Player 2',
+        name: isClientConnected ? prev.player2.name : 'Player 2',
         shortName: 'P2',
         title: 'Online Challenger',
         score: 0,
@@ -699,7 +709,7 @@ export default function App() {
         wrongCount: 0,
         wager: 0,
       },
-    });
+    }));
 
     setMatchStats({
       totalQuestions: 0,
@@ -716,21 +726,19 @@ export default function App() {
     setFinalPlayer2Input('');
     setPlayerFinalWager(1000);
     setPlayer2FinalWager(1000);
+    setFinalPlayer3Input('');
+    setPlayer3FinalWager(1000);
     setGameState((prev) => ({...prev, status: 'PLAYING', score: 0, level: 1}));
     setIsGameMenuOpen(false);
     setIsHowToPlayOpen(false);
     setIsInviteModalOpen(false);
     setIsLeaderboardOpen(false);
     setIsTagEditorOpen(false);
-
-    if (sdk) {
-      sdk.startGame();
-    }
-  }, [initializeBoards, sdk, isTwoPlayerMode, isClientConnected, playerName]);
+  }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human]);
 
   // Host handling of Player Buzz Action (Player 1 or Player 2)
   const handleContestantBuzz = useCallback(
-    (contestantId: 'player' | 'player2') => {
+    (contestantId: 'player' | RemoteSeat) => {
       if (!activeClue) return;
 
       // Early buzz penalty during READING phase
@@ -775,7 +783,7 @@ export default function App() {
 
   // Host handling contestant answer submission
   const handleContestantSubmitAnswer = useCallback(
-    (answer: string, answeringId: 'player' | 'player2') => {
+    (answer: string, answeringId: 'player' | RemoteSeat) => {
       if (!activeClue || activeClue.phase !== 'ANSWERING' || activeClue.buzzedContestantId !== answeringId) return;
 
       const isBonus = activeClue.isBonusWager;
@@ -878,41 +886,58 @@ export default function App() {
 
   // P2P Message Dispatcher for Host & Client
   const handleP2PMessage = useCallback(
-    (msg: P2PMessage) => {
-      // 1. Host receives events from joined remote friend
+    (msg: P2PMessage, fromPeerId: string) => {
+      // 1. Host receives events from friends' phones
       if (deviceRole === 'HOST') {
-        switch (msg.type) {
-          case 'CLIENT_JOIN':
-            setIsClientConnected(true);
-            setIsTwoPlayerMode(true);
-            showToast('🎉 Friend Connected on Separate Device as Player 2!');
-            gameAudio.playConfirmSelect();
-            setContestants((prev) => ({
-              ...prev,
-              player2: {
-                ...prev.player2,
-                name: msg.playerName || 'Friend (P2)',
-              },
-            }));
-            break;
+        if (msg.type === 'CLIENT_JOIN') {
+          const seats = remoteSeatsRef.current;
+          if (seats[fromPeerId]) return;
+          const taken = new Set(Object.values(seats));
+          const seat = REMOTE_SEATS.find((s) => !taken.has(s));
+          if (!seat) {
+            showToast('The room is full (3 players max).');
+            p2pRef.current?.send({type: 'ROOM_FULL'}, fromPeerId);
+            p2pRef.current?.disconnectPeer(fromPeerId);
+            return;
+          }
+          const next = {...seats, [fromPeerId]: seat};
+          remoteSeatsRef.current = next;
+          setRemoteSeats(next);
+          setIsClientConnected(true);
+          setIsTwoPlayerMode(true);
+          const label = seatLabel(seat);
+          const name = msg.playerName || `Friend (${label})`;
+          showToast(`🎉 ${name} joined on their phone as ${label}!`);
+          gameAudio.playConfirmSelect();
+          setContestants((prev) => ({
+            ...prev,
+            [seat]: {...prev[seat], name, shortName: label, title: 'Online Challenger'},
+          }));
+          return;
+        }
 
+        // Every other message must come from a seated friend, and only acts for that seat.
+        const seat = remoteSeatsRef.current[fromPeerId];
+        if (!seat) return;
+
+        switch (msg.type) {
           case 'CLIENT_BUZZ':
-            handleContestantBuzz('player2');
+            handleContestantBuzz(seat);
             break;
 
           case 'CLIENT_ANSWER':
-            handleContestantSubmitAnswer(msg.answer, 'player2');
+            handleContestantSubmitAnswer(msg.answer, seat);
             break;
 
           case 'CLIENT_SELECT_CLUE':
-            if (activeSelector === 'player2') {
-              selectClue(msg.catIdx, msg.clueIdx, 'player2');
+            if (activeSelector === seat) {
+              selectClue(msg.catIdx, msg.clueIdx, seat);
             }
             break;
 
           case 'CLIENT_SET_WAGER':
             setActiveClue((prev) => {
-              if (!prev || !prev.isBonusWager) return prev;
+              if (!prev || !prev.isBonusWager || prev.bonusSelectingPlayerId !== seat || prev.bonusWagerLocked) return prev;
               const isLock = Boolean(msg.lockIn);
               if (isLock) {
                 gameAudio.playConfirmSelect();
@@ -924,18 +949,20 @@ export default function App() {
                 timer: isLock ? 12.0 : prev.timer,
                 maxTimer: isLock ? 12.0 : prev.maxTimer,
                 feedbackText: isLock
-                  ? `Player 2 locked wager at $${msg.wager.toLocaleString()}! Provide answer.`
+                  ? `${contestants[seat]?.name || seatLabel(seat)} locked wager at $${msg.wager.toLocaleString()}! Provide answer.`
                   : prev.feedbackText,
               };
             });
             break;
 
           case 'CLIENT_FINAL_WAGER':
-            setPlayer2FinalWager(msg.wager);
+            if (seat === 'player2') setPlayer2FinalWager(msg.wager);
+            else setPlayer3FinalWager(msg.wager);
             break;
 
           case 'CLIENT_FINAL_ANSWER':
-            setFinalPlayer2Input(msg.answer);
+            if (seat === 'player2') setFinalPlayer2Input(msg.answer);
+            else setFinalPlayer3Input(msg.answer);
             break;
 
           default:
@@ -945,8 +972,19 @@ export default function App() {
 
       // 2. Client receives state updates from Host
       if (deviceRole === 'CLIENT') {
+        if (msg.type === 'ROOM_FULL') {
+          setP2PStatus('error');
+          setP2PDetail('This room is full (3 players max).');
+          showToast('This room is full (3 players max).');
+          p2pRef.current?.destroy();
+          return;
+        }
         if (msg.type === 'STATE_SYNC') {
           const s = msg.payload;
+          if (s.seats) {
+            const mine = s.seats[p2pRef.current?.peerId ?? ''];
+            if (mine) setMySeat(mine);
+          }
           if (s.gameState) setGameState(s.gameState);
           if (s.currentRound) setCurrentRound(s.currentRound);
           if (s.round1Board) setRound1Board(s.round1Board);
@@ -963,8 +1001,13 @@ export default function App() {
         }
       }
     },
-    [deviceRole, handleContestantBuzz, handleContestantSubmitAnswer, activeSelector, selectClue, showToast]
+    [deviceRole, handleContestantBuzz, handleContestantSubmitAnswer, activeSelector, selectClue, showToast, contestants]
   );
+
+  // The connection lives as long as the room. It reads the latest handler through a ref
+  // instead of tearing down and reconnecting every time game state changes.
+  const handleP2PMessageRef = useRef(handleP2PMessage);
+  handleP2PMessageRef.current = handleP2PMessage;
 
   // Initialize P2P Connection Manager
   useEffect(() => {
@@ -974,19 +1017,39 @@ export default function App() {
     }
 
     const role = deviceRole === 'HOST' ? 'host' : 'client';
+    const name = playerNameRef.current;
     const mgr = new P2PConnectionManager(
       roomCode,
       role,
-      (msg) => handleP2PMessage(msg),
-      (status, detail) => {
-        setP2PStatus(status);
-        if (detail) setP2PDetail(detail);
-        if (status === 'connected') {
-          setIsClientConnected(true);
-        } else if (status === 'disconnected') {
-          setIsClientConnected(false);
-        }
-      }
+      {
+        onMessage: (msg, fromPeerId) => handleP2PMessageRef.current(msg, fromPeerId),
+        onStatus: (status, detail) => {
+          setP2PStatus(status);
+          if (detail) setP2PDetail(detail);
+          if (status === 'connected' && role === 'client') {
+            setIsClientConnected(true);
+          } else if (status === 'disconnected') {
+            setIsClientConnected(false);
+          }
+        },
+        onPeerLeft: (peerId) => {
+          const seats = {...remoteSeatsRef.current};
+          const seat = seats[peerId];
+          if (!seat) return;
+          delete seats[peerId];
+          remoteSeatsRef.current = seats;
+          setRemoteSeats(seats);
+          showToast(`${seatLabel(seat)} disconnected.`);
+          if (seat === 'analyst') {
+            // Stats Riley (AI) takes the third seat back over.
+            setContestants((prev) => ({
+              ...prev,
+              analyst: {...prev.analyst, name: 'Stats Riley', shortName: 'Riley', title: 'Analytics Guru'},
+            }));
+          }
+        },
+      },
+      name && name !== 'Champion' ? name : undefined
     );
 
     p2pRef.current = mgr;
@@ -994,7 +1057,7 @@ export default function App() {
     return () => {
       mgr.destroy();
     };
-  }, [roomCode, deviceRole, handleP2PMessage]);
+  }, [roomCode, deviceRole, showToast]);
 
   // Host sends STATE_SYNC broadcast to joined friends
   useEffect(() => {
@@ -1014,6 +1077,7 @@ export default function App() {
       finalClue,
       finalShowdownPhase,
       finalShowdownTimer,
+      seats: remoteSeats,
     };
 
     p2pRef.current.send({
@@ -1035,6 +1099,7 @@ export default function App() {
     finalClue,
     finalShowdownPhase,
     finalShowdownTimer,
+    remoteSeats,
   ]);
 
   // AI Board Selection turn logic when it's Coach or Analyst's turn to pick
@@ -1053,7 +1118,11 @@ export default function App() {
       return;
     }
 
-    if (activeSelector === 'player' || ((isTwoPlayerMode || isClientConnected) && activeSelector === 'player2')) {
+    if (
+      activeSelector === 'player' ||
+      ((isTwoPlayerMode || isClientConnected) && activeSelector === 'player2') ||
+      (player3Human && activeSelector === 'analyst')
+    ) {
       return; // Human turn to pick
     }
 
@@ -1121,6 +1190,7 @@ export default function App() {
     isTagEditorOpen,
     contestants,
     selectClue,
+    player3Human,
   ]);
 
   // Main active clue timer and buzzer loop (Authoritative on Host)
@@ -1261,7 +1331,7 @@ export default function App() {
     if (deviceRole !== 'HOST' || !activeClue || activeClue.phase !== 'BUZZER_OPEN' || activeClue.isBonusWager) return;
 
     const coachCanBuzz = !isTwoPlayerMode && !isClientConnected && !activeClue.buzzerLockout.coach;
-    const analystCanBuzz = !activeClue.buzzerLockout.analyst;
+    const analystCanBuzz = !player3Human && !activeClue.buzzerLockout.analyst;
 
     const reflexMult = getConfig('aiReflexSpeedMultiplier') as number;
     const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult;
@@ -1310,7 +1380,7 @@ export default function App() {
     return () => {
       timeouts.forEach((t) => clearTimeout(t));
     };
-  }, [deviceRole, activeClue?.phase, activeClue?.buzzerLockout, activeClue?.isBonusWager, aiConfig, isTwoPlayerMode, isClientConnected]);
+  }, [deviceRole, activeClue?.phase, activeClue?.buzzerLockout, activeClue?.isBonusWager, aiConfig, isTwoPlayerMode, isClientConnected, player3Human]);
 
   // AI Answering logic when Coach or Analyst is answering (Host only, only once clue is revealed!)
   useEffect(() => {
@@ -1324,6 +1394,7 @@ export default function App() {
     }
     const buzzedId = activeClue.buzzedContestantId;
     if (buzzedId !== 'coach' && buzzedId !== 'analyst') return;
+    if (buzzedId === 'analyst' && player3Human) return;
 
     const isCoach = buzzedId === 'coach';
     const accuracy = isCoach ? aiConfig.coachAcc : aiConfig.analystAcc;
@@ -1400,7 +1471,7 @@ export default function App() {
     }, thinkTime);
 
     return () => clearTimeout(timer);
-  }, [deviceRole, activeClue?.phase, activeClue?.buzzedContestantId, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, aiConfig, contestants, isTwoPlayerMode, isClientConnected]);
+  }, [deviceRole, activeClue?.phase, activeClue?.buzzedContestantId, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, aiConfig, contestants, isTwoPlayerMode, isClientConnected, player3Human]);
 
   // Spacebar, Enter, number (1-8), and letter (A-H) shortcuts for buzzing and answering
   useEffect(() => {
@@ -1426,11 +1497,11 @@ export default function App() {
 
         if (chosenIdx >= 0 && chosenIdx < activeClue.options.length) {
           const selectedAnswer = activeClue.options[chosenIdx];
-          if (deviceRole === 'CLIENT' && activeClue.buzzedContestantId === 'player2') {
+          if (deviceRole === 'CLIENT' && activeClue.buzzedContestantId === mySeat) {
             e.preventDefault();
             p2pRef.current?.send({
               type: 'CLIENT_ANSWER',
-              contestantId: 'player2',
+              contestantId: mySeat,
               answer: selectedAnswer,
             });
             return;
@@ -1452,7 +1523,7 @@ export default function App() {
           e.preventDefault();
           p2pRef.current?.send({
             type: 'CLIENT_BUZZ',
-            contestantId: 'player2',
+            contestantId: mySeat,
             timestamp: Date.now(),
           });
         }
@@ -1473,7 +1544,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeClue, handleContestantBuzz, handleContestantSubmitAnswer, answerMode, isTwoPlayerMode, isClientConnected, deviceRole]);
+  }, [activeClue, handleContestantBuzz, handleContestantSubmitAnswer, answerMode, isTwoPlayerMode, isClientConnected, deviceRole, mySeat]);
 
   // Check Round Completion & Transition (Host only)
   useEffect(() => {
@@ -1496,6 +1567,7 @@ export default function App() {
       setFinalShowdownPhase('WAGER');
       setPlayerFinalWager(Math.max(1000, contestants.player.score));
       setPlayer2FinalWager(Math.max(1000, contestants.player2.score));
+      setPlayer3FinalWager(Math.max(1000, contestants.analyst.score));
     }
   }, [deviceRole, activeClue, currentRound, round1Board, round2Board, answeredClueIds, contestants, isTwoPlayerMode, isClientConnected]);
 
@@ -1525,7 +1597,7 @@ export default function App() {
       },
       analyst: {
         ...c.analyst,
-        wager: calculateAIWager(c.analyst.score, c.analyst.score === maxScore),
+        wager: player3Human ? player3FinalWager : calculateAIWager(c.analyst.score, c.analyst.score === maxScore),
       },
       player: {
         ...c.player,
@@ -1539,7 +1611,7 @@ export default function App() {
 
     setFinalShowdownPhase('CLUE');
     setFinalShowdownTimer(30);
-  }, [contestants, playerFinalWager, player2FinalWager, isTwoPlayerMode, isClientConnected]);
+  }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, isTwoPlayerMode, isClientConnected]);
 
   // Record game result to multi-dimensional leaderboard
   const saveMatchToLeaderboard = useCallback(
@@ -1587,7 +1659,9 @@ export default function App() {
     const player2Correct = (isTwoPlayerMode || isClientConnected) ? checkTypedAnswer(finalPlayer2Input, finalClue, threshold) : false;
 
     const coachCorrect = Math.random() < aiConfig.coachAcc;
-    const analystCorrect = Math.random() < aiConfig.analystAcc;
+    const analystCorrect = player3Human
+      ? checkTypedAnswer(finalPlayer3Input, finalClue, threshold)
+      : Math.random() < aiConfig.analystAcc;
 
     const coachScoreDelta = coachCorrect ? contestants.coach.wager : -contestants.coach.wager;
     const analystScoreDelta = analystCorrect ? contestants.analyst.wager : -contestants.analyst.wager;
@@ -1613,7 +1687,11 @@ export default function App() {
         score: finalAnalystScore,
         reaction: analystCorrect ? 'correct' : 'wrong',
         finalCorrect: analystCorrect,
-        finalAnswer: analystCorrect ? finalClue.correctAnswer : finalClue.distractors[1],
+        finalAnswer: player3Human
+          ? finalPlayer3Input || '(No Answer)'
+          : analystCorrect
+          ? finalClue.correctAnswer
+          : finalClue.distractors[1],
       },
       player: {
         ...c.player,
@@ -1640,7 +1718,10 @@ export default function App() {
       finalAnalystScore
     );
 
-    const humanWon = finalPlayerScore === highestScore || ((isTwoPlayerMode || isClientConnected) && finalPlayer2Score === highestScore);
+    const humanWon =
+      finalPlayerScore === highestScore ||
+      ((isTwoPlayerMode || isClientConnected) && finalPlayer2Score === highestScore) ||
+      (player3Human && finalAnalystScore === highestScore);
 
     // Save final match score to persistent Leaderboard
     saveMatchToLeaderboard(finalPlayerScore);
@@ -1652,7 +1733,7 @@ export default function App() {
       gameAudio.playDefeatMotif();
       setGameState((prev) => ({...prev, status: 'GAME_OVER', score: finalPlayerScore}));
     }
-  }, [finalClue, finalPlayerInput, finalPlayer2Input, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
+  }, [finalClue, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
 
   // Final Showdown Clue Timer Loop (Host)
   useEffect(() => {
@@ -1745,10 +1826,11 @@ export default function App() {
   // VIEW 1: DEDICATED MOBILE / SEPARATE DEVICE GAMEPAD CLIENT VIEW (PLAYER 2)
   // =========================================================================
   if (deviceRole === 'CLIENT') {
-    const isPlayer2Selector = activeSelector === 'player2';
-    const isPlayer2Buzzed = activeClue?.buzzedContestantId === 'player2';
-    const isPlayer2Locked = Boolean(activeClue?.buzzerLockout.player2);
-    const isDailyDoubleForMe = Boolean(activeClue?.isBonusWager && activeClue.bonusSelectingPlayerId === 'player2');
+    const isPlayer2Selector = activeSelector === mySeat;
+    const isPlayer2Buzzed = activeClue?.buzzedContestantId === mySeat;
+    const isPlayer2Locked = Boolean(activeClue?.buzzerLockout[mySeat]);
+    const isDailyDoubleForMe = Boolean(activeClue?.isBonusWager && activeClue.bonusSelectingPlayerId === mySeat);
+    const myLabel = seatLabel(mySeat);
     const board = currentRound === 'ROUND_1' ? round1Board : round2Board;
     const isClueObscured = Boolean(activeClue?.isBonusWager && !activeClue.bonusWagerLocked);
 
@@ -1765,7 +1847,7 @@ export default function App() {
             </div>
             <div>
               <div className="text-xs font-black text-amber-400 flex items-center gap-1.5 uppercase">
-                <span>P2 ARENA CONTROLLER</span>
+                <span>{myLabel} ARENA CONTROLLER</span>
                 <span className="text-[10px] px-1.5 py-0.2 bg-emerald-950 text-emerald-300 border border-emerald-700 rounded">
                   {roomCode}
                 </span>
@@ -1780,7 +1862,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <div className="bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-700 text-right">
               <div className="text-[9px] text-amber-400 font-bold uppercase">YOUR BANK</div>
-              <div className="text-xs font-black text-emerald-400">${contestants.player2.score.toLocaleString()}</div>
+              <div className="text-xs font-black text-emerald-400">${contestants[mySeat].score.toLocaleString()}</div>
             </div>
 
             <button
@@ -1803,9 +1885,13 @@ export default function App() {
               <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-400 flex items-center justify-center">
                 <Smartphone className="w-6 h-6 text-amber-400 animate-bounce" />
               </div>
-              <h2 className="text-lg font-black text-amber-400 uppercase">CONNECTED AS PLAYER 2</h2>
+              <h2 className="text-lg font-black text-amber-400 uppercase">
+                {p2pStatus === 'error' ? 'COULD NOT JOIN' : p2pStatus === 'connected' ? `CONNECTED AS PLAYER ${myLabel.slice(1)}` : 'CONNECTING...'}
+              </h2>
               <p className="text-xs text-slate-300">
-                You are locked in for the match! Waiting for the Host (Player 1) to select options and enter the arena.
+                {p2pStatus === 'error'
+                  ? p2pDetail
+                  : 'You are locked in for the match! Waiting for the host (Player 1) to pick the settings and start the game.'}
               </p>
               <div className="text-[11px] text-emerald-400 font-bold bg-emerald-950/80 px-3 py-1.5 rounded-full border border-emerald-700 flex items-center gap-1.5">
                 <Wifi className="w-3.5 h-3.5" />
@@ -1869,7 +1955,7 @@ export default function App() {
                         }
                         p2pRef.current?.send({
                           type: 'CLIENT_BUZZ',
-                          contestantId: 'player2',
+                          contestantId: mySeat,
                           timestamp: Date.now(),
                         });
                       }}
@@ -1894,8 +1980,8 @@ export default function App() {
                   </div>
 
                   <div className="text-[11px] text-slate-300">
-                    Bankroll: <strong className="text-amber-400">${contestants.player2.score.toLocaleString()}</strong> | Min: $5 | Max: $
-                    {Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants.player2.score).toLocaleString()}
+                    Bankroll: <strong className="text-amber-400">${contestants[mySeat].score.toLocaleString()}</strong> | Min: $5 | Max: $
+                    {Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score).toLocaleString()}
                   </div>
 
                   <div className="flex items-center gap-2 w-full justify-center">
@@ -1903,13 +1989,13 @@ export default function App() {
                     <input
                       type="number"
                       min={5}
-                      max={Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants.player2.score)}
+                      max={Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score)}
                       value={activeClue.bonusWagerInput}
                       onChange={(e) => {
                         const val = parseInt(e.target.value) || 5;
                         p2pRef.current?.send({
                           type: 'CLIENT_SET_WAGER',
-                          contestantId: 'player2',
+                          contestantId: mySeat,
                           wager: val,
                           lockIn: false,
                         });
@@ -1921,10 +2007,10 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-2 w-full">
                     <button
                       onClick={() => {
-                        const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants.player2.score);
+                        const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score);
                         p2pRef.current?.send({
                           type: 'CLIENT_SET_WAGER',
-                          contestantId: 'player2',
+                          contestantId: mySeat,
                           wager: maxVal,
                           lockIn: false,
                         });
@@ -1935,10 +2021,10 @@ export default function App() {
 
                     <button
                       onClick={() => {
-                        const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants.player2.score);
+                        const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score);
                         p2pRef.current?.send({
                           type: 'CLIENT_SET_WAGER',
-                          contestantId: 'player2',
+                          contestantId: mySeat,
                           wager: Math.max(50, Math.floor(maxVal / 2)),
                           lockIn: false,
                         });
@@ -1952,7 +2038,7 @@ export default function App() {
                     onClick={() => {
                       p2pRef.current?.send({
                         type: 'CLIENT_SET_WAGER',
-                        contestantId: 'player2',
+                        contestantId: mySeat,
                         wager: activeClue.bonusWagerInput,
                         lockIn: true,
                       });
@@ -1979,7 +2065,7 @@ export default function App() {
                           onClick={() => {
                             p2pRef.current?.send({
                               type: 'CLIENT_ANSWER',
-                              contestantId: 'player2',
+                              contestantId: mySeat,
                               answer: opt,
                             });
                           }}
@@ -2004,7 +2090,7 @@ export default function App() {
                         onClick={() => {
                           p2pRef.current?.send({
                             type: 'CLIENT_ANSWER',
-                            contestantId: 'player2',
+                            contestantId: mySeat,
                             answer: activeClue.typedInput,
                           });
                         }}
@@ -2044,7 +2130,7 @@ export default function App() {
                               onClick={() => {
                                 p2pRef.current?.send({
                                   type: 'CLIENT_SELECT_CLUE',
-                                  contestantId: 'player2',
+                                  contestantId: mySeat,
                                   catIdx: cIdx,
                                   clueIdx: rIdx,
                                 });
@@ -2091,14 +2177,14 @@ export default function App() {
                     <input
                       type="number"
                       min={0}
-                      max={Math.max(1000, contestants.player2.score)}
+                      max={Math.max(1000, contestants[mySeat].score)}
                       value={player2FinalWager}
                       onChange={(e) => {
                         const val = parseInt(e.target.value) || 0;
                         setPlayer2FinalWager(val);
                         p2pRef.current?.send({
                           type: 'CLIENT_FINAL_WAGER',
-                          contestantId: 'player2',
+                          contestantId: mySeat,
                           wager: val,
                         });
                       }}
@@ -2123,7 +2209,7 @@ export default function App() {
                       setFinalPlayer2Input(val);
                       p2pRef.current?.send({
                         type: 'CLIENT_FINAL_ANSWER',
-                        contestantId: 'player2',
+                        contestantId: mySeat,
                         answer: val,
                       });
                     }}
@@ -2157,20 +2243,19 @@ export default function App() {
 
         {/* Client Bottom Footer Standings */}
         <footer className="relative z-10 w-full bg-slate-900/90 border border-slate-800 rounded-xl p-2 flex items-center justify-around text-center">
-          <div>
-            <div className="text-[9px] text-slate-400 uppercase">Host (P1)</div>
-            <div className="text-xs font-black text-white">${contestants.player.score.toLocaleString()}</div>
-          </div>
-          <div className="w-px h-6 bg-slate-800" />
-          <div>
-            <div className="text-[9px] text-emerald-400 uppercase font-black">You (P2)</div>
-            <div className="text-xs font-black text-emerald-300">${contestants.player2.score.toLocaleString()}</div>
-          </div>
-          <div className="w-px h-6 bg-slate-800" />
-          <div>
-            <div className="text-[9px] text-slate-400 uppercase">Stats Riley</div>
-            <div className="text-xs font-black text-white">${contestants.analyst.score.toLocaleString()}</div>
-          </div>
+          {(['player', 'player2', 'analyst'] as ContestantId[]).map((id, idx) => (
+            <React.Fragment key={id}>
+              {idx > 0 && <div className="w-px h-6 bg-slate-800" />}
+              <div>
+                <div className={`text-[9px] uppercase ${id === mySeat ? 'text-emerald-400 font-black' : 'text-slate-400'}`}>
+                  {id === mySeat ? `You (${seatLabel(id)})` : contestants[id].name}
+                </div>
+                <div className={`text-xs font-black ${id === mySeat ? 'text-emerald-300' : 'text-white'}`}>
+                  ${contestants[id].score.toLocaleString()}
+                </div>
+              </div>
+            </React.Fragment>
+          ))}
         </footer>
       </div>
     );
@@ -2381,6 +2466,8 @@ export default function App() {
                     <span className="text-emerald-400 font-black">
                       {isClientConnected ? 'Player 2 is selecting on their device...' : 'Player 2 turn! Select any clue tile.'}
                     </span>
+                  ) : player3Human && activeSelector === 'analyst' ? (
+                    <span className="text-emerald-400 font-black">Player 3 is selecting on their device...</span>
                   ) : (
                     <span className="text-slate-400">Waiting for opponent pick...</span>
                   )}
@@ -2392,8 +2479,8 @@ export default function App() {
                 {(currentRound === 'ROUND_1' ? round1Board : round2Board).map((cat) => (
                   <div
                     key={cat.title}
-                    className="bg-gradient-to-b from-blue-900 to-slate-900 border border-blue-600 rounded-md p-1 sm:p-1.5 shadow-md flex items-center justify-center min-h-[38px] sm:min-h-[44px]">
-                    <span className="text-[8px] sm:text-[11px] md:text-xs font-black tracking-tight text-amber-300 line-clamp-2 uppercase" title={cat.title}>
+                    className="bg-gradient-to-b from-blue-900 to-slate-900 border border-blue-600 rounded-md p-1 sm:p-1.5 shadow-md flex items-center justify-center min-h-[52px] sm:min-h-[44px]">
+                    <span className="text-[8px] sm:text-[11px] md:text-xs font-black tracking-tight text-amber-300 line-clamp-4 sm:line-clamp-2 uppercase leading-tight break-words hyphens-auto" title={cat.title}>
                       {cat.title}
                     </span>
                   </div>
@@ -2897,11 +2984,11 @@ export default function App() {
                       <span>LOCK IN WAGER & REVEAL CLUE</span>
                     </button>
                   </div>
-                ) : isClientConnected && activeClue.bonusSelectingPlayerId === 'player2' ? (
-                  /* Waiting for Player 2 on remote device */
+                ) : isClientConnected && (activeClue.bonusSelectingPlayerId === 'player2' || (player3Human && activeClue.bonusSelectingPlayerId === 'analyst')) ? (
+                  /* Waiting for a friend on their own phone */
                   <div className="text-xs text-amber-300 font-bold flex items-center gap-2">
                     <Clock className="w-4 h-4 animate-spin text-amber-400" />
-                    <span>Waiting for Player 2 to submit their wager on their device...</span>
+                    <span>Waiting for {contestants[activeClue.bonusSelectingPlayerId]?.name} to submit their wager on their device...</span>
                   </div>
                 ) : (
                   /* AI Opponent Wager Announcement */
@@ -3453,9 +3540,19 @@ export default function App() {
                       : 'bg-slate-950/80 text-emerald-300 border-emerald-600 hover:border-emerald-400'
                   }`}>
                   <Smartphone className="w-4 h-4" />
-                  <span>{isClientConnected ? '✓ Phone Duel Active' : 'Invite Phone / 2P'}</span>
+                  <span>{isClientConnected ? `✓ ${Object.keys(remoteSeats).length + 1} Phones Linked` : 'Invite Phones (up to 3)'}</span>
                 </button>
               </div>
+              {Object.keys(remoteSeats).length > 0 && (
+                <div className="mt-1.5 text-[11px] text-emerald-300 font-bold">
+                  Joined: {(Object.values(remoteSeats) as RemoteSeat[])
+                    .sort()
+                    .reverse()
+                    .map((seat) => `${contestants[seat].name} (${seatLabel(seat)})`)
+                    .join(', ')}
+                  {!player3Human && ' · Stats Riley (AI) plays the third seat'}
+                </div>
+              )}
             </div>
 
             {/* AI Difficulty Selector */}

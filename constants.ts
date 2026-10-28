@@ -1,3 +1,4 @@
+import gameConfig from './game-config.json';
 import {SpriteConfig} from './utils/helper';
 
 /**
@@ -175,12 +176,9 @@ export const CONFIG = {
   },
 };
 
-// Merge customized config values if present (injected by Playground)
-const {playgroundConfig} = globalThis as {
-  playgroundConfig?: Record<string, unknown>;
-};
-if (playgroundConfig) {
-  for (const [key, value] of Object.entries(playgroundConfig)) {
+// Merge the tuned values from game-config.json (originally set in Google Playground)
+if (gameConfig.values) {
+  for (const [key, value] of Object.entries(gameConfig.values)) {
     if (key in CONFIG) {
       Object.assign(CONFIG[key as keyof typeof CONFIG], {value});
     }
