@@ -1,7 +1,9 @@
 // P2P Multiplayer Synchronization for Cross-Device Sports Arena Quiz
-// Supports PeerJS WebRTC for true separate devices/mobile + BroadcastChannel for same-browser multi-tab instant sync.
+// The host phone runs the game and up to two friends join from their own phones
+// over PeerJS WebRTC data connections. The host is authoritative: friends send
+// their taps, the host broadcasts the full game state back to everyone.
 
-export type PeerRole = 'host' | 'client' | 'local';
+import Peer, {DataConnection} from 'peerjs';
 
 export type P2PMessage =
   | { type: 'STATE_SYNC'; payload: any }
@@ -12,102 +14,68 @@ export type P2PMessage =
   | { type: 'CLIENT_SET_WAGER'; contestantId: string; wager: number; lockIn?: boolean }
   | { type: 'CLIENT_FINAL_WAGER'; contestantId: string; wager: number }
   | { type: 'CLIENT_FINAL_ANSWER'; contestantId: string; answer: string }
-  | { type: 'HOST_START_GAME' }
-  | { type: 'HOST_RESTART_GAME' }
-  | { type: 'PING'; time: number }
-  | { type: 'PONG'; time: number; hostTime: number };
+  | { type: 'ROOM_FULL' }
+  | { type: 'PING'; time: number };
 
-declare global {
-  interface Window {
-    Peer: any;
-  }
-}
+export type P2PStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 // Prefix to keep room IDs unique and clean on public PeerJS broker
 const PEER_PREFIX = 'sportsarena-quiz-';
 
+// Uses the free public PeerJS broker unless VITE_PEER_HOST points at another
+// signaling server (handy for local testing with `npx peerjs --port 9000`).
+const env = import.meta.env;
+const BROKER = env.VITE_PEER_HOST
+  ? {
+      host: env.VITE_PEER_HOST as string,
+      port: Number(env.VITE_PEER_PORT || 443),
+      path: (env.VITE_PEER_PATH as string) || '/',
+      secure: env.VITE_PEER_SECURE !== 'false',
+    }
+  : {};
+
+export interface P2PCallbacks {
+  /** A message arrived. On the host, fromPeerId says which friend sent it. */
+  onMessage: (msg: P2PMessage, fromPeerId: string) => void;
+  onStatus: (status: P2PStatus, detail?: string) => void;
+  /** Host only: a friend's connection closed. */
+  onPeerLeft?: (peerId: string) => void;
+}
+
 export class P2PConnectionManager {
-  private peer: any = null;
-  private connection: any = null;
-  private broadcastChannel: BroadcastChannel | null = null;
+  private peer: Peer | null = null;
+  // Host: one connection per friend. Client: just the host.
+  private connections = new Map<string, DataConnection>();
   private isHost = false;
   private roomCode = '';
-  private onMessageCallback: ((msg: P2PMessage) => void) | null = null;
-  private onStatusCallback: ((status: 'disconnected' | 'connecting' | 'connected' | 'error', detail?: string) => void) | null = null;
-  private pingInterval: any = null;
+  private playerName: string;
+  private callbacks: P2PCallbacks;
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
   private isDestroyed = false;
 
-  constructor(
-    roomCode: string,
-    role: 'host' | 'client',
-    onMessage: (msg: P2PMessage) => void,
-    onStatus: (status: 'disconnected' | 'connecting' | 'connected' | 'error', detail?: string) => void
-  ) {
+  constructor(roomCode: string, role: 'host' | 'client', callbacks: P2PCallbacks, playerName = 'Friend') {
     this.roomCode = roomCode.toUpperCase().trim();
     this.isHost = role === 'host';
-    this.onMessageCallback = onMessage;
-    this.onStatusCallback = onStatus;
-
-    this.initBroadcastChannel();
-    this.initPeerJS();
+    this.callbacks = callbacks;
+    this.playerName = playerName;
+    this.initPeer();
   }
 
-  // 1. Initialize local BroadcastChannel for zero-latency multi-tab sync
-  private initBroadcastChannel() {
-    try {
-      if (typeof BroadcastChannel !== 'undefined') {
-        this.broadcastChannel = new BroadcastChannel(`sa_room_${this.roomCode}`);
-        this.broadcastChannel.onmessage = (e) => {
-          if (e.data && this.onMessageCallback) {
-            this.onMessageCallback(e.data as P2PMessage);
-          }
-        };
-      }
-    } catch (err) {
-      console.warn('BroadcastChannel not supported', err);
-    }
+  /** This device's PeerJS id (a client uses it to find its seat in the host's state). */
+  public get peerId(): string {
+    return this.peer?.id ?? '';
   }
 
-  // 2. Load PeerJS script dynamically from unpkg
-  private async loadPeerJSScript(): Promise<boolean> {
-    if (window.Peer) return true;
-    return new Promise((resolve) => {
-      const existingScript = document.getElementById('peerjs-script');
-      if (existingScript) {
-        existingScript.addEventListener('load', () => resolve(true));
-        existingScript.addEventListener('error', () => resolve(false));
-        return;
-      }
-      const script = document.createElement('script');
-      script.id = 'peerjs-script';
-      script.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-      script.async = true;
-      script.onload = () => resolve(true);
-      script.onerror = () => {
-        console.warn('Failed to load PeerJS from CDN');
-        resolve(false);
-      };
-      document.head.appendChild(script);
-    });
-  }
-
-  // 3. Initialize PeerJS connection
-  private async initPeerJS() {
-    this.onStatusCallback?.('connecting', 'Initializing WebRTC peer...');
-    const loaded = await this.loadPeerJSScript();
-    if (this.isDestroyed) return;
-
-    if (!loaded || !window.Peer) {
-      this.onStatusCallback?.('error', 'Local network mode active');
-      return;
-    }
+  private initPeer() {
+    this.callbacks.onStatus('connecting', 'Initializing WebRTC peer...');
 
     const peerId = this.isHost
       ? `${PEER_PREFIX}${this.roomCode}`
-      : `${PEER_PREFIX}${this.roomCode}-client-${Math.floor(Math.random() * 10000)}`;
+      : `${PEER_PREFIX}${this.roomCode}-client-${Math.floor(Math.random() * 1000000)}`;
 
     try {
-      this.peer = new window.Peer(peerId, {
+      this.peer = new Peer(peerId, {
+        ...BROKER,
         debug: 1,
         config: {
           iceServers: [
@@ -117,126 +85,119 @@ export class P2PConnectionManager {
           ],
         },
       });
-
-      this.peer.on('open', (id: string) => {
-        if (this.isHost) {
-          this.onStatusCallback?.('connecting', `Room ${this.roomCode} hosted. Waiting for Player 2...`);
-        } else {
-          this.onStatusCallback?.('connecting', `Connecting to host ${this.roomCode}...`);
-          this.connectToHost();
-        }
-      });
-
-      if (this.isHost) {
-        this.peer.on('connection', (conn: any) => {
-          this.setupDataConnection(conn);
-          this.onStatusCallback?.('connected', 'Player 2 Connected via WebRTC!');
-          // Send initial welcome message
-          this.send({ type: 'PING', time: Date.now() });
-        });
-      }
-
-      this.peer.on('error', (err: any) => {
-        console.warn('[PeerJS] Error:', err);
-        // If host ID is already taken, fallback gracefully
-        if (err.type === 'unavailable-id' && this.isHost) {
-          this.onStatusCallback?.('connected', 'Room session active');
-        } else {
-          this.onStatusCallback?.('error', err.message || 'WebRTC connection error');
-        }
-      });
-
-      this.peer.on('disconnected', () => {
-        if (!this.isDestroyed) {
-          this.peer?.reconnect();
-        }
-      });
     } catch (e) {
       console.warn('[PeerJS] Exception:', e);
-      this.onStatusCallback?.('error', 'Local sync active');
+      this.callbacks.onStatus('error', 'Could not start online play on this device');
+      return;
     }
+
+    this.peer.on('open', () => {
+      if (this.isHost) {
+        this.callbacks.onStatus('connecting', `Room ${this.roomCode} is open. Waiting for friends to join...`);
+      } else {
+        this.callbacks.onStatus('connecting', `Connecting to host ${this.roomCode}...`);
+        this.connectToHost();
+      }
+    });
+
+    if (this.isHost) {
+      this.peer.on('connection', (conn) => {
+        conn.on('open', () => {
+          this.setupDataConnection(conn);
+          this.callbacks.onStatus('connected', 'A friend connected!');
+        });
+      });
+    }
+
+    this.peer.on('error', (err: any) => {
+      console.warn('[PeerJS] Error:', err);
+      if (err.type === 'unavailable-id' && this.isHost) {
+        this.callbacks.onStatus('error', 'That room code is already in use. Pick a new room code.');
+      } else if (err.type === 'peer-unavailable') {
+        this.callbacks.onStatus('error', 'Could not find that room. Check the room code.');
+      } else {
+        this.callbacks.onStatus('error', err.message || 'WebRTC connection error');
+      }
+    });
+
+    this.peer.on('disconnected', () => {
+      if (!this.isDestroyed) {
+        this.peer?.reconnect();
+      }
+    });
+
+    // Heartbeat keeps mobile connections from idling out.
+    this.pingInterval = setInterval(() => this.send({ type: 'PING', time: Date.now() }), 5000);
   }
 
-  // 4. Client connects to Host Peer
+  // Client connects to Host Peer
   private connectToHost() {
     if (!this.peer) return;
-    const hostPeerId = `${PEER_PREFIX}${this.roomCode}`;
-    const conn = this.peer.connect(hostPeerId, { reliable: true });
+    const conn = this.peer.connect(`${PEER_PREFIX}${this.roomCode}`, { reliable: true });
 
     conn.on('open', () => {
       this.setupDataConnection(conn);
-      this.onStatusCallback?.('connected', 'Connected to Arena Host!');
-      this.send({ type: 'CLIENT_JOIN', playerName: 'Player 2 (Online)' });
+      this.callbacks.onStatus('connected', 'Connected to the host!');
+      this.send({ type: 'CLIENT_JOIN', playerName: this.playerName });
     });
 
     conn.on('error', (err: any) => {
       console.warn('[PeerJS] Host connect error:', err);
-      this.onStatusCallback?.('error', 'Could not reach Host. Check room code.');
+      this.callbacks.onStatus('error', 'Could not reach the host. Check the room code.');
     });
   }
 
-  // 5. Setup data connection listeners
-  private setupDataConnection(conn: any) {
-    this.connection = conn;
+  private setupDataConnection(conn: DataConnection) {
+    this.connections.set(conn.peer, conn);
 
-    conn.on('data', (data: any) => {
-      if (this.onMessageCallback) {
-        this.onMessageCallback(data as P2PMessage);
-      }
+    conn.on('data', (data) => {
+      this.callbacks.onMessage(data as P2PMessage, conn.peer);
     });
 
     conn.on('close', () => {
-      this.connection = null;
-      this.onStatusCallback?.('disconnected', 'Player 2 Disconnected');
+      if (this.isDestroyed) return;
+      this.connections.delete(conn.peer);
+      if (this.isHost) {
+        this.callbacks.onPeerLeft?.(conn.peer);
+        if (this.connections.size === 0) this.callbacks.onStatus('disconnected', 'All friends disconnected');
+      } else {
+        this.callbacks.onStatus('disconnected', 'Lost connection to the host');
+      }
     });
 
     conn.on('error', (err: any) => {
       console.warn('[PeerJS] Data conn error:', err);
     });
-
-    // Start heartbeat
-    if (this.pingInterval) clearInterval(this.pingInterval);
-    this.pingInterval = setInterval(() => {
-      this.send({ type: 'PING', time: Date.now() });
-    }, 5000);
   }
 
-  // 6. Send message to peer and local broadcast
-  public send(msg: P2PMessage) {
-    // Send via WebRTC DataChannel if open
-    if (this.connection && this.connection.open) {
+  /** Host: send to every friend (or one, with toPeerId). Client: send to the host. */
+  public send(msg: P2PMessage, toPeerId?: string) {
+    for (const [peerId, conn] of this.connections) {
+      if (toPeerId && peerId !== toPeerId) continue;
+      if (!conn.open) continue;
       try {
-        this.connection.send(msg);
+        conn.send(msg);
       } catch (err) {
         console.warn('[PeerJS] Send error:', err);
       }
     }
-
-    // Also mirror to BroadcastChannel for instant same-browser multi-tab sync
-    if (this.broadcastChannel) {
-      try {
-        this.broadcastChannel.postMessage(msg);
-      } catch (err) {
-        // ignore
-      }
-    }
   }
 
-  // 7. Cleanup
+  /** Host: drop one friend's connection (used to turn away a 4th phone). */
+  public disconnectPeer(peerId: string) {
+    const conn = this.connections.get(peerId);
+    if (!conn) return;
+    this.connections.delete(peerId);
+    // Give the ROOM_FULL message a moment to arrive before closing.
+    setTimeout(() => conn.close(), 500);
+  }
+
   public destroy() {
     this.isDestroyed = true;
     if (this.pingInterval) clearInterval(this.pingInterval);
-    if (this.broadcastChannel) {
-      this.broadcastChannel.close();
-      this.broadcastChannel = null;
-    }
-    if (this.connection) {
-      this.connection.close();
-      this.connection = null;
-    }
-    if (this.peer) {
-      this.peer.destroy();
-      this.peer = null;
-    }
+    for (const conn of this.connections.values()) conn.close();
+    this.connections.clear();
+    this.peer?.destroy();
+    this.peer = null;
   }
 }
