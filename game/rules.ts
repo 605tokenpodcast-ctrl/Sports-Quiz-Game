@@ -1,7 +1,7 @@
 // Game rules as plain functions: timers, scoring, wagers and how a clue moves from phase to
 // phase. Nothing here touches React, sound or the network, so it can be tested on its own.
 import {checkTypedAnswer, type QuestionClue} from '../triviaData';
-import type {ActiveClueState, AIDifficulty, Contestant, ContestantId, Countdown, RoundType} from './types';
+import type {ActiveClueState, AIDifficulty, Contestant, ContestantId, Countdown} from './types';
 
 // Seconds for each step of a clue.
 export const TIMES = {
@@ -65,20 +65,21 @@ export function aiSettings(difficulty: AIDifficulty): AISettings {
 
 // --- Wagers -----------------------------------------------------------------------------
 
-const roundMaxClue = (round: RoundType) => (round === 'ROUND_1' ? 1000 : 2000);
+// `topClue` is the highest tile on the board in play: $1,000 / $2,000 in a full game,
+// $1,500 / $3,000 in a short one.
 
-/** A Daily Double can risk the whole score, or the round's top clue value when the score is lower. */
-export const maxDailyDoubleWager = (round: RoundType, score: number) => Math.max(roundMaxClue(round), score);
-export const clampDailyDoubleWager = (wager: number, round: RoundType, score: number) =>
-  Math.max(5, Math.min(maxDailyDoubleWager(round, score), Math.round(Number(wager)) || 5));
+/** A Daily Double can risk the whole score, or the board's top clue value when the score is lower. */
+export const maxDailyDoubleWager = (topClue: number, score: number) => Math.max(topClue, score);
+export const clampDailyDoubleWager = (wager: number, topClue: number, score: number) =>
+  Math.max(5, Math.min(maxDailyDoubleWager(topClue, score), Math.round(Number(wager)) || 5));
 /** The amount a player's Daily Double box starts at. */
-export const defaultDailyDoubleWager = (round: RoundType, score: number) =>
-  Math.min(roundMaxClue(round), maxDailyDoubleWager(round, score));
+export const defaultDailyDoubleWager = (topClue: number, score: number) =>
+  Math.min(topClue, maxDailyDoubleWager(topClue, score));
 
 /** Better AI players bet bigger. */
-export function aiDailyDoubleWager(accuracy: number, round: RoundType, score: number): number {
-  const max = maxDailyDoubleWager(round, score);
-  const bet = accuracy > 0.8 ? max * 0.9 : accuracy > 0.6 ? max * 0.65 : Math.max(roundMaxClue(round), max * 0.4);
+export function aiDailyDoubleWager(accuracy: number, topClue: number, score: number): number {
+  const max = maxDailyDoubleWager(topClue, score);
+  const bet = accuracy > 0.8 ? max * 0.9 : accuracy > 0.6 ? max * 0.65 : Math.max(topClue, max * 0.4);
   return Math.max(5, Math.min(max, Math.round(Math.floor(bet) / 50) * 50));
 }
 
