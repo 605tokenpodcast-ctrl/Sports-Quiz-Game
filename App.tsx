@@ -72,7 +72,7 @@ import {
 } from './triviaData';
 import {generateQRCodeMatrix} from './utils/qrCode';
 import {P2PConnectionManager, P2PMessage} from './utils/p2pSync';
-import VoiceAnswerButton from './utils/VoiceAnswerButton';
+import VoiceAnswerButton, {isVoiceSupported} from './utils/VoiceAnswerButton';
 import {
   AnswerFormat,
   FORMAT_OPTIONS,
@@ -101,7 +101,10 @@ const BGM_TRIVIA = 'assets/audio/bgm_trivia_stage.mp3';
 const BGM_FINAL = 'assets/audio/bgm_final_showdown.mp3';
 
 export type AIDifficulty = 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT';
-export type AnswerMode = 'STANDARD' | 'HARD' | 'EXPERT'; // 4-choice, 8-choice, Typed
+export type AnswerMode = 'STANDARD' | 'HARD' | 'EXPERT' | 'VOICE'; // 4-choice, 8-choice, Typed, Mic only
+
+// Typed and mic-only modes show no options and check the answer with fuzzy matching.
+const isOpenAnswerMode = (mode: AnswerMode) => mode === 'EXPERT' || mode === 'VOICE';
 export type RoundType = 'ROUND_1' | 'CHAMPIONSHIP' | 'FINAL_SHOWDOWN' | 'RESULTS';
 export type ContestantId = 'coach' | 'player' | 'analyst' | 'player2';
 
@@ -546,7 +549,7 @@ export default function App() {
 
   // Helper to shuffle distractors and construct options array with guaranteed 8-choice / 4-choice integrity
   const generateOptions = useCallback((clue: QuestionClue, mode: AnswerMode): string[] => {
-    if (mode === 'EXPERT') return [];
+    if (isOpenAnswerMode(mode)) return [];
     return buildQuestionOptions(clue, mode);
   }, []);
 
@@ -554,9 +557,9 @@ export default function App() {
   // typed mode submits the recognizer's best guess. Returns a hint when it can't tell.
   const answerByVoice = (heard: string[], submit: (answer: string) => void): string | void => {
     if (!activeClue) return;
-    if (answerMode === 'EXPERT') {
+    if (isOpenAnswerMode(answerMode)) {
       const answer = pickSpokenTypedAnswer(heard, activeClue.clue, getConfig('fuzzyMatchThreshold') as number);
-      if (!answer) return "Didn't catch that. Try again or type it.";
+      if (!answer) return answerMode === 'VOICE' ? "Didn't catch that. Tap the mic and try again." : "Didn't catch that. Try again or type it.";
       setActiveClue((prev) => (prev ? {...prev, typedInput: answer} : null));
       submit(answer);
       return;
@@ -800,13 +803,15 @@ export default function App() {
           ...prev,
           phase: 'ANSWERING',
           buzzedContestantId: contestantId,
-          timer: 8.0,
-          maxTimer: 8.0,
-          feedbackText: `${name}'s Turn! Select or type your answer!`,
+          // Mic-only answers get a little longer, so a missed word can be said again.
+          timer: answerMode === 'VOICE' ? 10.0 : 8.0,
+          maxTimer: answerMode === 'VOICE' ? 10.0 : 8.0,
+          feedbackText:
+            answerMode === 'VOICE' ? `${name}'s Turn! Say your answer!` : `${name}'s Turn! Select or type your answer!`,
         };
       });
     },
-    [activeClue, contestants]
+    [activeClue, contestants, answerMode]
   );
 
   // Host handling contestant answer submission
@@ -819,7 +824,7 @@ export default function App() {
       const threshold = getConfig('fuzzyMatchThreshold') as number;
 
       const isCorrect =
-        answerMode === 'EXPERT'
+        isOpenAnswerMode(answerMode)
           ? checkTypedAnswer(answer, activeClue.clue, threshold)
           : answer.trim().toLowerCase() === activeClue.clue.correctAnswer.trim().toLowerCase();
 
@@ -1511,7 +1516,7 @@ export default function App() {
       if (
         activeClue.phase === 'ANSWERING' &&
         (!activeClue.isBonusWager || activeClue.bonusWagerLocked) &&
-        answerMode !== 'EXPERT'
+        !isOpenAnswerMode(answerMode)
       ) {
         const key = e.key.toUpperCase();
         const num = parseInt(e.key, 10);
@@ -2085,7 +2090,21 @@ export default function App() {
                     YOUR TURN TO ANSWER! ({activeClue.timer.toFixed(1)}s)
                   </div>
 
-                  {answerMode !== 'EXPERT' ? (
+                  {answerMode === 'VOICE' && isVoiceSupported ? (
+                    <VoiceAnswerButton
+                      key={activeClue.clue.id}
+                      autoStart
+                      size="large"
+                      label="SAY YOUR ANSWER"
+                      onHeard={(heard) =>
+                        answerByVoice(heard, (answer) =>
+                          p2pRef.current?.send({type: 'CLIENT_ANSWER', contestantId: mySeat, answer})
+                        )
+                      }
+                    />
+                  ) : (
+                  <>
+                  {!isOpenAnswerMode(answerMode) ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {activeClue.options.map((opt, idx) => (
                         <button
@@ -2135,6 +2154,8 @@ export default function App() {
                       )
                     }
                   />
+                  </>
+                  )}
                 </div>
               )}
             </div>
@@ -3093,7 +3114,21 @@ export default function App() {
               (!activeClue.isBonusWager || activeClue.bonusWagerLocked) &&
               (activeClue.buzzedContestantId === 'player' || (activeClue.buzzedContestantId === 'player2' && !isClientConnected)) && (
                 <div className="w-full z-20">
-                  {answerMode !== 'EXPERT' ? (
+                  {answerMode === 'VOICE' && isVoiceSupported ? (
+                    <VoiceAnswerButton
+                      key={`${activeClue.clue.id}-${activeClue.buzzedContestantId}`}
+                      autoStart
+                      size="large"
+                      label="SAY YOUR ANSWER"
+                      onHeard={(heard) =>
+                        answerByVoice(heard, (answer) =>
+                          handleContestantSubmitAnswer(answer, activeClue.buzzedContestantId as 'player' | 'player2')
+                        )
+                      }
+                    />
+                  ) : (
+                  <>
+                  {!isOpenAnswerMode(answerMode) ? (
                     <div className="w-full flex flex-col gap-1.5">
                       <div className="text-[10px] sm:text-xs text-amber-300 font-bold uppercase tracking-wider flex items-center justify-between px-1">
                         <span>Select or Press [A-H] / [1-8]:</span>
@@ -3165,6 +3200,8 @@ export default function App() {
                       }
                     />
                   </div>
+                  </>
+                  )}
                 </div>
               )}
           </div>
@@ -3365,7 +3402,7 @@ export default function App() {
               <label className="text-[10px] font-bold text-amber-300 uppercase tracking-wider block mb-1">
                 3. Answer Format Combination
               </label>
-              <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <div className="grid grid-cols-2 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
                 {FORMAT_OPTIONS.map((f) => (
                   <button
                     key={f.id}
@@ -3640,12 +3677,13 @@ export default function App() {
               <label className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-1">
                 Answer Format Mode
               </label>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
                 {(
                   [
                     {id: 'STANDARD', label: '4-Choice', desc: 'Standard (4-Choice)'},
                     {id: 'HARD', label: '8-Choice', desc: 'Hardcore (8 Curated)'},
                     {id: 'EXPERT', label: 'Typed Text', desc: 'Expert (Fuzzy Match)'},
+                    ...(isVoiceSupported ? [{id: 'VOICE', label: 'Mic Only', desc: 'Say Your Answer'}] : []),
                   ] as const
                 ).map((m) => (
                   <button
