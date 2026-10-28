@@ -55,6 +55,8 @@ import {
 import {
   buildQuestionOptions,
   checkTypedAnswer,
+  matchSpokenOption,
+  pickSpokenTypedAnswer,
   createFullGameSession,
   FINAL_SHOWDOWN_QUESTIONS,
   getCategoriesForRound,
@@ -70,6 +72,7 @@ import {
 } from './triviaData';
 import {generateQRCodeMatrix} from './utils/qrCode';
 import {P2PConnectionManager, P2PMessage} from './utils/p2pSync';
+import VoiceAnswerButton from './utils/VoiceAnswerButton';
 import {
   AnswerFormat,
   FORMAT_OPTIONS,
@@ -546,6 +549,31 @@ export default function App() {
     if (mode === 'EXPERT') return [];
     return buildQuestionOptions(clue, mode);
   }, []);
+
+  // Turn what a player said into an answer. Multiple choice picks the option they named;
+  // typed mode submits the recognizer's best guess. Returns a hint when it can't tell.
+  const answerByVoice = (heard: string[], submit: (answer: string) => void): string | void => {
+    if (!activeClue) return;
+    if (answerMode === 'EXPERT') {
+      const answer = pickSpokenTypedAnswer(heard, activeClue.clue, getConfig('fuzzyMatchThreshold') as number);
+      if (!answer) return "Didn't catch that. Try again or type it.";
+      setActiveClue((prev) => (prev ? {...prev, typedInput: answer} : null));
+      submit(answer);
+      return;
+    }
+    const match = matchSpokenOption(heard, activeClue.options);
+    if (!match) return `Heard "${heard[0]}". Not sure which one you meant, so tap it.`;
+    submit(match);
+  };
+
+  // Final Showdown answers are typed, so voice fills the box and the player checks it before submitting.
+  const finalAnswerByVoice = (heard: string[], setAnswer: (answer: string) => void): string | void => {
+    if (!finalClue) return;
+    const answer = pickSpokenTypedAnswer(heard, finalClue, getConfig('fuzzyMatchThreshold') as number);
+    if (!answer) return "Didn't catch that. Try again or type it.";
+    setAnswer(answer);
+    return `Heard "${answer}". Fix it if needed, then submit.`;
+  };
 
   // Open a clue card (authoritative selection on host)
   const selectClue = useCallback(
@@ -2099,6 +2127,14 @@ export default function App() {
                       </button>
                     </div>
                   )}
+                  <VoiceAnswerButton
+                    key={activeClue.clue.id}
+                    onHeard={(heard) =>
+                      answerByVoice(heard, (answer) =>
+                        p2pRef.current?.send({type: 'CLIENT_ANSWER', contestantId: mySeat, answer})
+                      )
+                    }
+                  />
                 </div>
               )}
             </div>
@@ -2214,6 +2250,15 @@ export default function App() {
                       });
                     }}
                     className="w-full bg-slate-950 border-2 border-amber-400 px-3 py-2 rounded-lg text-white font-bold text-center"
+                  />
+                  <VoiceAnswerButton
+                    label="SAY FINAL ANSWER"
+                    onHeard={(heard) =>
+                      finalAnswerByVoice(heard, (answer) => {
+                        setFinalPlayer2Input(answer);
+                        p2pRef.current?.send({type: 'CLIENT_FINAL_ANSWER', contestantId: mySeat, answer});
+                      })
+                    }
                   />
                 </div>
               )}
@@ -2643,6 +2688,7 @@ export default function App() {
                       autoFocus
                       className="w-full bg-slate-950 border-2 border-amber-500 text-white text-sm sm:text-base font-bold px-4 py-2 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
+                    <VoiceAnswerButton label="SAY FINAL ANSWER" onHeard={(heard) => finalAnswerByVoice(heard, setFinalPlayerInput)} />
 
                     {(isTwoPlayerMode || isClientConnected) && !isClientConnected && (
                       <input
@@ -3109,6 +3155,16 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                  <div className="mt-2">
+                    <VoiceAnswerButton
+                      key={`${activeClue.clue.id}-${activeClue.buzzedContestantId}`}
+                      onHeard={(heard) =>
+                        answerByVoice(heard, (answer) =>
+                          handleContestantSubmitAnswer(answer, activeClue.buzzedContestantId as 'player' | 'player2')
+                        )
+                      }
+                    />
+                  </div>
                 </div>
               )}
           </div>

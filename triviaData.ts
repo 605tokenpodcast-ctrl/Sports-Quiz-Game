@@ -370,3 +370,91 @@ function levenshteinDistance(a: string, b: string): number {
   }
   return matrix[b.length][a.length];
 }
+
+// ===========================================================================
+// SPOKEN ANSWERS (voice input)
+// ===========================================================================
+
+const NUMBER_WORDS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
+  eleventh: 11, twelfth: 12,
+};
+
+/** Lowercases, strips punctuation and filler words, and turns number words into digits. */
+function normalizeSpoken(s: string): string {
+  const words = s
+    .toLowerCase()
+    .replace(/\b49ers\b/g, 'niners')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/-/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !['the', 'a', 'an', 'um', 'uh', 'is', 'its', 'i', 'think', 'say', 'round', 'number', 'to', 'and'].includes(w));
+  const out: string[] = [];
+  for (const w of words) {
+    const n = NUMBER_WORDS[w];
+    const prev = out.length ? Number(out[out.length - 1]) : NaN;
+    // "twenty nine" -> 29
+    if (n !== undefined && n < 10 && !isNaN(prev) && prev >= 20 && prev % 10 === 0) {
+      out[out.length - 1] = String(prev + n);
+    } else if (n !== undefined) {
+      out.push(String(n));
+    } else {
+      out.push(w.replace(/(st|nd|rd|th)$/, (m) => (/^\d+/.test(w) ? '' : m)));
+    }
+  }
+  return out.join(' ');
+}
+
+function spokenScore(heard: string, option: string): number {
+  const h = normalizeSpoken(heard);
+  const o = normalizeSpoken(option);
+  if (!h || !o) return 0;
+  if (h === o) return 1;
+  // Numeric options ("13", "Round 6", "29-13") must match their digits exactly.
+  if (/^[\d\s]+$/.test(o)) return h.split(' ').join(' ') === o || h.replace(/\s/g, '') === o.replace(/\s/g, '') ? 1 : 0;
+  const hTokens = new Set(h.split(' '));
+  const oTokens = o.split(' ').filter((t) => t.length >= 3);
+  const tokenHits = oTokens.length ? oTokens.filter((t) => hTokens.has(t)).length / oTokens.length : 0;
+  // Saying only a last name or a nickname ("Mahomes", "Chiefs") counts as a strong match.
+  const lastWord = o.split(' ').pop() || '';
+  const lastHit = lastWord.length >= 3 && hTokens.has(lastWord) ? 0.85 : 0;
+  return Math.max(calculateSimilarity(h, o), tokenHits, lastHit);
+}
+
+/**
+ * Picks the multiple-choice option a player said out loud. `heard` holds the speech
+ * recognizer's guesses, best first. Returns null when nothing matches clearly enough.
+ */
+export function matchSpokenOption(heard: string[], options: string[]): string | null {
+  let best: string | null = null;
+  let bestScore = 0;
+  let runnerUp = 0;
+  for (const option of options) {
+    const score = Math.max(0, ...heard.map((h) => spokenScore(h, option)));
+    if (score > bestScore) {
+      runnerUp = bestScore;
+      bestScore = score;
+      best = option;
+    } else if (score > runnerUp) {
+      runnerUp = score;
+    }
+  }
+  return best && bestScore >= 0.6 && bestScore - runnerUp >= 0.1 ? best : null;
+}
+
+/**
+ * For typed-answer mode: picks which of the recognizer's guesses to submit. Prefers a
+ * guess that the fuzzy checker accepts, since recognizers often mishear names on the first try.
+ */
+export function pickSpokenTypedAnswer(heard: string[], clue: QuestionClue, threshold = 0.75): string {
+  const cleaned = heard.map((h) => h.trim()).filter(Boolean);
+  const numeric = cleaned.map((h) => normalizeSpoken(h));
+  for (let i = 0; i < cleaned.length; i++) {
+    if (checkTypedAnswer(cleaned[i], clue, threshold)) return cleaned[i];
+    if (checkTypedAnswer(numeric[i], clue, threshold)) return numeric[i];
+  }
+  return cleaned[0] || '';
+}
