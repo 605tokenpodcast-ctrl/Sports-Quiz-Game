@@ -132,10 +132,11 @@ check('scores go up and down by the stake', () => {
 });
 
 check('wagers stay inside the limits', () => {
-  assert.equal(clampDailyDoubleWager(99_999, 'ROUND_1', 300), 1000);
-  assert.equal(clampDailyDoubleWager(99_999, 'CHAMPIONSHIP', 300), 2000);
-  assert.equal(clampDailyDoubleWager(5000, 'ROUND_1', 6000), 5000);
-  assert.equal(clampDailyDoubleWager(-50, 'ROUND_1', 0), 5);
+  assert.equal(clampDailyDoubleWager(99_999, 1000, 300), 1000);
+  assert.equal(clampDailyDoubleWager(99_999, 2000, 300), 2000);
+  assert.equal(clampDailyDoubleWager(99_999, 3000, 300), 3000);
+  assert.equal(clampDailyDoubleWager(5000, 1000, 6000), 5000);
+  assert.equal(clampDailyDoubleWager(-50, 1000, 0), 5);
   assert.equal(clampFinalWager(99_999, 2500), 2500);
   assert.equal(clampFinalWager(99_999, -400), 1000);
   assert.equal(clampFinalWager(-5, 2500), 0);
