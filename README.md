@@ -39,6 +39,15 @@ npx peerjs --port 9000
 VITE_PEER_HOST=localhost VITE_PEER_PORT=9000 VITE_PEER_SECURE=false npm run dev
 ```
 
+## Answering by voice
+
+When it's your turn to answer, tap **🎙️ SAY IT** and say your answer. On multiple
+choice, the game picks the option you named (a last name or team nickname is enough).
+If it isn't sure, it shows what it heard and you tap instead. In expert mode and the
+Final Showdown it fills in the answer box for you to check. Voice uses the browser's
+speech recognition, which works in Chrome (Android, desktop) and Safari (iPhone).
+The button hides itself on browsers without it. `npm run test:voice` checks the matching.
+
 ## Settings
 
 `game-config.json` holds the tuned timers and volumes, such as the question timer,
