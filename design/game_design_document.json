@@ -1,7 +1,7 @@
 {
   "title": "Sports Arena Quiz",
   "hook": "Ultimate sports trivia arena showdown",
-  "game_overview": "North American sports quiz (NFL, NBA, MLB, NHL, NCAA) with 6,000+ categories and an anti-repeat engine guaranteeing zero repeats across 100,000+ games, custom tags, and multiplayer.",
+  "game_overview": "NFL trivia quiz with thousands of questions rebuilt weekly from nflverse data, an anti-repeat engine that skips questions a device has already seen, custom tags, and multiplayer.",
   "artstyle": "modern-vector",
   "genre": "trivia",
   "winning_condition": "Accumulate the highest total cash winnings by correctly answering sports trivia questions and outperform both AI competitors in the Final Showdown.",
@@ -44,7 +44,7 @@
   "sections": [
     {
       "title": "Design Pillars",
-      "content": "1. Deep Sports Authenticity: Covering NFL, NBA, MLB, NHL, NCAA, and historic American sports milestones with zero repeat fatigue. 2. Scalable Skill Expression: Distinct answer modes (4-choice Standard, 8-choice Hard, Fill-in-the-blank Expert) and 4 AI intelligence tiers. 3. Broadcast Showmanship: Electric arena stage presentation, tense buzzer races, bonus multiplier wagers, and stadium sound effects.",
+      "content": "1. Deep Sports Authenticity: Covering NFL history and the current season, with questions refreshed every week. 2. Scalable Skill Expression: Distinct answer modes (4-choice Standard, 8-choice Hard, Fill-in-the-blank Expert) and 4 AI intelligence tiers. 3. Broadcast Showmanship: Electric arena stage presentation, tense buzzer races, bonus multiplier wagers, and stadium sound effects.",
       "summary": "Core foundational pillars of the sports quiz game."
     },
     {

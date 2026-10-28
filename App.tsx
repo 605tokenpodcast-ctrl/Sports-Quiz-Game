@@ -69,9 +69,7 @@ import {
   getTotalCategoryCount,
   loadExternalQuestionBank,
   resetSeenQuestions,
-  setQuestionScope,
   ExternalBankInfo,
-  QuestionScope,
   QuestionClue,
   TriviaCategory,
 } from './triviaData';
@@ -291,19 +289,13 @@ export default function App() {
   const [round2Board, setRound2Board] = useState<TriviaCategory[]>([]);
   const [answeredClueIds, setAnsweredClueIds] = useState<Set<string>>(new Set());
 
-  // NFL question bank (built weekly from nflverse data) and the NFL-only toggle
+  // NFL question bank, built weekly from nflverse data
   const [bankInfo, setBankInfo] = useState<ExternalBankInfo | null>(null);
-  const [questionScope, setQuestionScopeState] = useState<QuestionScope>('ALL');
 
   useEffect(() => {
     loadExternalQuestionBank().then((info) => {
       if (info) setBankInfo(info);
     });
-  }, []);
-
-  const changeQuestionScope = useCallback((scope: QuestionScope) => {
-    setQuestionScope(scope);
-    setQuestionScopeState(scope);
   }, []);
 
   // Anti-repeat question statistics
@@ -313,11 +305,11 @@ export default function App() {
 
   const totalQuestionCount = useMemo(() => {
     return getTotalAvailableQuestionCount();
-  }, [bankInfo, questionScope]);
+  }, [bankInfo]);
 
   const totalCategoryCount = useMemo(() => {
     return getTotalCategoryCount();
-  }, [bankInfo, questionScope]);
+  }, [bankInfo]);
 
   // Control of the Board
   const [activeSelector, setActiveSelector] = useState<ContestantId>('player');
@@ -3396,8 +3388,8 @@ export default function App() {
               SPORTS ARENA SHOWDOWN
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mb-3">
-              Face off in sports trivia across the NFL, NBA, college sports, MLB, NHL and soccer, with {totalQuestionCount.toLocaleString()} questions in {totalCategoryCount} categories
-              {bankInfo ? ` and fresh NFL questions updated through the ${bankInfo.dataThrough}` : ''}.
+              Face off in NFL trivia with {totalQuestionCount.toLocaleString()} questions in {totalCategoryCount} categories
+              {bankInfo ? `, updated through the ${bankInfo.dataThrough}` : ''}.
             </p>
 
             {/* Contestant Name Bar with fully interactive Edit Tag Modal */}
@@ -3427,33 +3419,6 @@ export default function App() {
             </div>
             <div className="w-full text-center text-[10px] text-emerald-400/90 font-medium mb-2">
               This device skips questions it has already seen until it runs out
-            </div>
-
-            {/* Question Pool Selector: all sports or NFL only */}
-            <div className="w-full mb-3 text-left">
-              <label className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-1">
-                Question Pool
-              </label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {([
-                  ['ALL', 'All Sports'],
-                  ['NFL', 'NFL Only'],
-                ] as [QuestionScope, string][]).map(([scope, label]) => (
-                  <button
-                    key={scope}
-                    onClick={() => {
-                      gameAudio.playCrispClick();
-                      changeQuestionScope(scope);
-                    }}
-                    className={`min-w-[44px] min-h-[44px] py-1 px-1 rounded-lg text-xs font-bold border transition-all ${
-                      questionScope === scope
-                        ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md font-black scale-[1.02]'
-                        : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-blue-500'
-                    }`}>
-                    {label}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Game Mode: Solo vs Cross-Device vs Pass & Play */}
@@ -3921,9 +3886,9 @@ export default function App() {
 
             <div className="flex flex-col gap-3 text-xs sm:text-sm text-slate-300 leading-relaxed overflow-y-auto max-h-[60vh] pr-1">
               <div>
-                <strong className="text-amber-400">✨ Comprehensive Multi-Sport Categories:</strong>
+                <strong className="text-amber-400">🏈 All-NFL Categories:</strong>
                 <p className="mt-0.5 text-slate-400">
-                  <strong>{totalQuestionCount.toLocaleString()} questions in {totalCategoryCount} categories</strong> spanning the NFL, NBA, college sports, MLB, NHL and soccer. NFL questions are rebuilt every week from nflverse data, and no question, category or answer repeats within a game. Pick <strong>NFL Only</strong> on the start screen for an all-football game.
+                  <strong>{totalQuestionCount.toLocaleString()} NFL questions in {totalCategoryCount} categories</strong>, from Super Bowls and the draft to this week's games. Questions are rebuilt every week from nflverse data, and no question, category or answer repeats within a game.
                 </p>
               </div>
 

@@ -15,7 +15,6 @@ import {
   generateBoardForRound,
   generateSmartDistractors,
   getChampionshipFinalClues,
-  getQuestionScope,
   getSeenQuestionsCount,
   getSeenQuestionIds,
   markQuestionSeen,
@@ -187,7 +186,7 @@ export function getFreshFinalShowdownClue(
   // Hand-written finals plus every hard clue in the current pool (including runtime banks).
   const byId = new Map<string, QuestionClue>();
   for (const q of [...FINAL_SHOWDOWN_QUESTIONS, ...getChampionshipFinalClues()]) {
-    if (getQuestionScope() === 'NFL' && q.sport !== 'NFL') continue;
+    if (q.sport !== 'NFL') continue;
     byId.set(q.id, q);
   }
   const finalPool = byId.size > 0 ? [...byId.values()] : FINAL_SHOWDOWN_QUESTIONS;

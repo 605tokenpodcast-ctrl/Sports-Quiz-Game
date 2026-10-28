@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "questions": "tsx scripts/build-nfl-questions.ts",
-    "simulate": "tsx tests/repeat-simulation.ts public/questions/nfl.json ../triviaData.ts"
+    "simulate": "tsx tests/repeat-simulation.ts"
   },
   "keywords": [],
   "author": "",

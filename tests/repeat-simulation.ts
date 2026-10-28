@@ -1,26 +1,28 @@
-// Simulates 60 games and reports when questions first repeat.
-// Usage: npx tsx tests/repeat-simulation.ts public/questions/nfl.json ../triviaData.ts
+// Simulates 40 games on one device and reports how much of each board was already seen.
+// Usage: npm run simulate
 import { readFileSync } from 'node:fs';
+
 const store: Record<string, string> = {};
 (globalThis as any).window = globalThis;
-(globalThis as any).localStorage = { getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => (store[k] = v), removeItem: (k: string) => delete store[k] };
-(globalThis as any).fetch = async () => ({ ok: true, json: async () => JSON.parse(readFileSync(process.argv[2], 'utf8')) });
-const T = await import(process.argv[3]);
+(globalThis as any).localStorage = {
+  getItem: (k: string) => store[k] ?? null,
+  setItem: (k: string, v: string) => (store[k] = v),
+  removeItem: (k: string) => delete store[k],
+};
+(globalThis as any).fetch = async () => ({ ok: true, json: async () => JSON.parse(readFileSync('public/questions/nfl.json', 'utf8')) });
+
+const T = await import('../triviaData');
 await T.loadExternalQuestionBank();
-for (const scope of ['ALL', 'NFL'] as const) {
-  T.resetSeenQuestions();
-  T.setQuestionScope(scope);
-  const seen = new Set<string>();
-  let firstRepeat = 0, games = 0, short = 0;
-  const total = T.getTotalAvailableQuestionCount();
-  for (games = 1; games <= 60; games++) {
-    const s = T.createFullGameSession('MEDIUM');
-    const ids = [...s.round1Board, ...s.round2Board].flatMap((c: any) => c.clues.map((q: any) => q.id)).concat(s.finalClue.id);
-    if (s.round1Board.length < 6 || s.round2Board.length < 6) short++;
-    const sports = new Set([...s.round1Board, ...s.round2Board].map((c: any) => c.sport));
-    if (scope === 'NFL' && [...sports].some((x) => x !== 'NFL')) throw new Error('non-NFL category in NFL mode');
-    if (!firstRepeat && ids.some((id: string) => seen.has(id))) firstRepeat = games;
-    ids.forEach((id: string) => seen.add(id));
-  }
-  console.log(`${scope}: ${total} questions; first repeated question in game #${firstRepeat || 'none within 60'}; boards short of 6 categories: ${short}`);
+const seen = new Set<string>();
+const repeated: number[] = [];
+for (let g = 1; g <= 40; g++) {
+  const s = T.createFullGameSession('MEDIUM');
+  const boards = [...s.round1Board, ...s.round2Board];
+  if (boards.some((c) => c.sport !== 'NFL')) throw new Error('Non-NFL category on the board');
+  if (s.round1Board.length < 6 || s.round2Board.length < 6) throw new Error(`Game ${g} has fewer than 6 categories in a round`);
+  const ids = boards.flatMap((c) => c.clues.map((q) => q.id));
+  repeated.push(Math.round((100 * ids.filter((id) => seen.has(id)).length) / ids.length));
+  ids.forEach((id) => seen.add(id));
 }
+console.log(`${T.getTotalAvailableQuestionCount()} NFL questions`);
+console.log(`% of each board already seen, games 1-40: ${repeated.join(', ')}`);

@@ -329,24 +329,13 @@ export interface CategorySpec {
 import { ALL_16_CATEGORY_SPECS } from './triviaBankData';
 
 // ===========================================================================
-// RUNTIME QUESTION BANKS & NFL-ONLY SCOPE
+// RUNTIME QUESTION BANKS (THE GAME IS NFL ONLY)
 // ===========================================================================
 
 // Categories loaded at runtime, such as the NFL bank built from nflverse data
 // by scripts/build-nfl-questions.ts and refreshed every week.
 const EXTERNAL_SPECS: CategorySpec[] = [];
 let COMPILED_CACHE: TriviaCategory[] | null = null;
-
-export type QuestionScope = 'ALL' | 'NFL';
-let QUESTION_SCOPE: QuestionScope = 'ALL';
-
-export function setQuestionScope(scope: QuestionScope): void {
-  QUESTION_SCOPE = scope;
-}
-
-export function getQuestionScope(): QuestionScope {
-  return QUESTION_SCOPE;
-}
 
 export interface ExternalBankInfo {
   questionCount: number;
@@ -373,10 +362,9 @@ export async function loadExternalQuestionBank(url = 'questions/nfl.json'): Prom
   }
 }
 
-/** Categories in play for the current scope (everything, or NFL only). */
+/** Categories in play. The game is NFL only, so other sports in the old bank are skipped. */
 export function getActiveCategories(): TriviaCategory[] {
-  const all = getAllCompiledCategories();
-  return QUESTION_SCOPE === 'NFL' ? all.filter((c) => c.sport === 'NFL') : all;
+  return getAllCompiledCategories().filter((c) => c.sport === 'NFL');
 }
 
 /**
