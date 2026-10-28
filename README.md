@@ -11,7 +11,19 @@ one person can play against two AI opponents (Coach Dave and Stats Riley).
 npm install
 npm run dev        # local dev server
 npm run build      # production build in dist/
+npm test           # type check plus the answer, voice and rules tests
+npm run test:game  # plays a whole game in a headless browser (needs Playwright)
 ```
+
+`npm run dev` also accepts `?board=2x2` (2 categories of 2 clues, add `&dd=0` for no
+Daily Double) to play a short game while testing.
+
+## Code layout
+
+- `App.tsx`: the game screens and the host's game flow.
+- `game/`: shared types and the game rules (clocks, scoring, wagers) as plain functions.
+- `triviaData.ts`, `triviaEngine.ts`: loading questions, building boards, checking answers.
+- `utils/`: multiplayer connection, voice answers, sounds, leaderboard and other helpers.
 
 ## Questions
 

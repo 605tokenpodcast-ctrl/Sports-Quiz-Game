@@ -64,6 +64,49 @@ import {
 } from './triviaData';
 import {generateQRCodeMatrix} from './utils/qrCode';
 import {P2PConnectionManager, P2PMessage} from './utils/p2pSync';
+import TimeLeft from './utils/TimeLeft';
+import {
+  ActiveClueState,
+  AIDifficulty,
+  AnswerMode,
+  Contestant,
+  ContestantId,
+  Countdown,
+  DeviceRole,
+  FinalLocks,
+  FinalPhase,
+  hideAnswer,
+  isOpenAnswerMode,
+  MatchStats,
+  NO_FINAL_LOCKS,
+  REMOTE_SEATS,
+  RemoteSeat,
+  RoundType,
+  seatLabel,
+} from './game/types';
+import {
+  aiDailyDoubleWager,
+  aiFinalWager,
+  AnswerHow,
+  aiSettings,
+  clampDailyDoubleWager,
+  clampFinalWager,
+  clueStake,
+  clueTimeUp,
+  countdownForSync,
+  countdownFromSync,
+  defaultDailyDoubleWager,
+  frozenCountdown,
+  isFinalAnswerRight,
+  maxDailyDoubleWager,
+  maxFinalWager,
+  pauseCountdown,
+  resolveAnswer,
+  resumeCountdown,
+  scoreAnswer,
+  startCountdown,
+  TIMES,
+} from './game/rules';
 import VoiceAnswerButton, {isVoiceSupported} from './utils/VoiceAnswerButton';
 import {
   AnswerFormat,
@@ -87,56 +130,6 @@ const IMG_TROPHY = 'assets/images/icon_trophy_gold.png';
 const BGM_TRIVIA = 'assets/audio/bgm_trivia_stage.mp3';
 const BGM_FINAL = 'assets/audio/bgm_final_showdown.mp3';
 
-export type AIDifficulty = 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT';
-export type AnswerMode = 'STANDARD' | 'HARD' | 'EXPERT' | 'VOICE'; // 4-choice, 8-choice, Typed, Mic only
-
-// Typed and mic-only modes show no options and check the answer with fuzzy matching.
-const isOpenAnswerMode = (mode: AnswerMode) => mode === 'EXPERT' || mode === 'VOICE';
-// What a phone gets of a question before the reveal: the clue without its answer.
-const hideAnswer = (clue: QuestionClue): QuestionClue => ({...clue, correctAnswer: '', aliases: [], distractors: []});
-export type RoundType = 'ROUND_1' | 'CHAMPIONSHIP' | 'FINAL_SHOWDOWN' | 'RESULTS';
-export type ContestantId = 'coach' | 'player' | 'analyst' | 'player2';
-
-// Seats a friend's phone can take. The third seat is the AI analyst ("Stats Riley")
-// unless a second friend joins online, in which case that friend plays it as P3.
-export type RemoteSeat = 'player2' | 'analyst';
-const REMOTE_SEATS: RemoteSeat[] = ['player2', 'analyst'];
-const seatLabel = (seat: ContestantId) => (seat === 'analyst' ? 'P3' : seat === 'player2' ? 'P2' : 'P1');
-export type DeviceRole = 'HOST' | 'CLIENT';
-
-interface Contestant {
-  id: ContestantId;
-  name: string;
-  shortName: string;
-  title: string;
-  score: number;
-  reaction: 'idle' | 'buzzing' | 'answering' | 'correct' | 'wrong' | 'locked';
-  correctCount: number;
-  wrongCount: number;
-  wager: number;
-  bonusHits?: number; // Daily Doubles answered correctly
-  finalAnswer?: string;
-  finalCorrect?: boolean;
-}
-
-interface ActiveClueState {
-  clue: QuestionClue;
-  catIndex: number;
-  clueIndex: number;
-  phase: 'READING' | 'BUZZER_OPEN' | 'ANSWERING' | 'REVEALED';
-  buzzedContestantId: ContestantId | null;
-  buzzerLockout: Record<ContestantId, boolean>;
-  timer: number;
-  maxTimer: number;
-  options: string[];
-  isBonusWager: boolean;
-  bonusSelectingPlayerId: ContestantId;
-  bonusWagerInput: number;
-  bonusWagerLocked: boolean;
-  selectedOption: string | null;
-  typedInput: string;
-  feedbackText: string;
-}
 
 const PRESET_TAG_SUGGESTIONS = [
   '🏆 Champion',
@@ -146,11 +139,11 @@ const PRESET_TAG_SUGGESTIONS = [
   '👑 KingPlay',
   '🔥 HotHand',
   '🏈 GridironAce',
-  '🏀 HoopMaster',
-  '⚾ SluggerKing',
-  '🏒 IceTitan',
-  '🏆 HeismanHero',
-  '🎓 MarchMadnessAce',
+  '🏟️ RedZoneKing',
+  '🧢 PlayCaller',
+  '🛡️ LockdownCB',
+  '💨 TwoMinuteDrill',
+  '🏅 HailMary',
 ];
 
 // Scannable SVG QR Code Generator Component
@@ -400,8 +393,8 @@ export default function App() {
   const [finalClue, setFinalClue] = useState<QuestionClue | null>(null);
   const [playerFinalWager, setPlayerFinalWager] = useState(1000);
   const [player2FinalWager, setPlayer2FinalWager] = useState(1000);
-  const [finalShowdownPhase, setFinalShowdownPhase] = useState<'WAGER' | 'CLUE' | 'RESULTS'>('WAGER');
-  const [finalShowdownTimer, setFinalShowdownTimer] = useState(25);
+  const [finalShowdownPhase, setFinalShowdownPhase] = useState<FinalPhase>('WAGER');
+  const [finalTimer, setFinalTimer] = useState<Countdown>(frozenCountdown(TIMES.final));
   const [finalPlayerInput, setFinalPlayerInput] = useState('');
   const [finalPlayer2Input, setFinalPlayer2Input] = useState('');
   const [player3FinalWager, setPlayer3FinalWager] = useState(1000);
@@ -410,7 +403,7 @@ export default function App() {
   const [finalOptions, setFinalOptions] = useState<string[]>([]);
 
   // Match statistics for post-game
-  const [matchStats, setMatchStats] = useState({
+  const [matchStats, setMatchStats] = useState<MatchStats>({
     totalQuestions: 0,
     playerCorrect: 0,
     playerWrong: 0,
@@ -461,13 +454,17 @@ export default function App() {
   );
 
   // Final Showdown: which players have locked their wager and their answer.
-  type FinalLocks = {wager: Partial<Record<ContestantId, boolean>>; answer: Partial<Record<ContestantId, boolean>>};
-  const NO_FINAL_LOCKS: FinalLocks = {wager: {}, answer: {}};
   const [finalLocks, setFinalLocks] = useState<FinalLocks>(NO_FINAL_LOCKS);
 
   // Latest values for timers and network callbacks that outlive a render.
   const activeClueRef = useRef(activeClue);
   activeClueRef.current = activeClue;
+  // Host: changes to the open clue go through here, so a timer or network message handled
+  // before the next render already sees the new clue.
+  const commitClue = (next: ActiveClueState | null) => {
+    activeClueRef.current = next;
+    setActiveClue(next);
+  };
   const contestantsRef = useRef(contestants);
   contestantsRef.current = contestants;
   const gameStatusRef = useRef(gameState.status);
@@ -590,8 +587,21 @@ export default function App() {
       r2[bonus2Cat].clues[bonus2Clue].isBonusWager = true;
     }
 
-    setRound1Board(r1);
-    setRound2Board(r2);
+    // Development only: ?board=2x2 plays a tiny board (2 categories of 2 clues) for quick tests.
+    const params = new URLSearchParams(window.location.search);
+    const small = import.meta.env.DEV && params.get('board')?.match(/^(\d)x(\d)$/);
+    const shrink = (board: TriviaCategory[]) => {
+      if (!small) return board;
+      const out = board.slice(0, +small[1]).map((cat) => ({...cat, clues: cat.clues.slice(0, +small[2])}));
+      const last = out[0]?.clues[out[0].clues.length - 1];
+      for (const cat of out) for (const q of cat.clues) q.isBonusWager = false;
+      // Daily Double on the last tile of the first category, unless &dd=0.
+      if (last && params.get('dd') !== '0') last.isBonusWager = true;
+      return out;
+    };
+
+    setRound1Board(shrink(r1));
+    setRound2Board(shrink(r2));
     setAnsweredClueIds(new Set());
 
     // Set Final Clue from deduplicated session
@@ -600,19 +610,7 @@ export default function App() {
   }, [difficulty]);
 
   // AI reflex and accuracy configuration
-  const aiConfig = useMemo(() => {
-    switch (difficulty) {
-      case 'EASY':
-        return {coachSpeed: 3.8, analystSpeed: 4.2, coachAcc: 0.45, analystAcc: 0.48};
-      case 'HARD':
-        return {coachSpeed: 1.4, analystSpeed: 1.3, coachAcc: 0.82, analystAcc: 0.86};
-      case 'EXPERT':
-        return {coachSpeed: 0.8, analystSpeed: 0.75, coachAcc: 0.94, analystAcc: 0.96};
-      case 'MEDIUM':
-      default:
-        return {coachSpeed: 2.3, analystSpeed: 2.1, coachAcc: 0.68, analystAcc: 0.72};
-    }
-  }, [difficulty]);
+  const aiConfig = useMemo(() => aiSettings(difficulty), [difficulty]);
 
   // Helper to shuffle distractors and construct options array with guaranteed 8-choice / 4-choice integrity
   const generateOptions = useCallback((clue: QuestionClue, mode: AnswerMode): string[] => {
@@ -665,23 +663,8 @@ export default function App() {
       const isBonus = Boolean(clue.isBonusWager);
       const options = generateOptions(clue, answerMode);
 
-      const roundMaxClue = currentRound === 'ROUND_1' ? 1000 : 2000;
       const pickerScore = contestants[pickerId]?.score || 0;
-      const maxWager = Math.max(roundMaxClue, pickerScore);
-
-      // AI Smart Wager Calculation
-      let aiWager = 500;
-      if (isBonus && !isHumanSeat(pickerId)) {
-        const acc = pickerId === 'coach' ? aiConfig.coachAcc : aiConfig.analystAcc;
-        if (acc > 0.8) {
-          aiWager = Math.floor(maxWager * 0.9);
-        } else if (acc > 0.6) {
-          aiWager = Math.floor(maxWager * 0.65);
-        } else {
-          aiWager = Math.max(roundMaxClue, Math.floor(maxWager * 0.4));
-        }
-        aiWager = Math.max(5, Math.min(maxWager, Math.round(aiWager / 50) * 50));
-      }
+      const aiWager = aiDailyDoubleWager(pickerId === 'coach' ? aiConfig.coachAcc : aiConfig.analystAcc, currentRound, pickerScore);
 
       if (isBonus) {
         gameAudio.playPowerupChime();
@@ -694,14 +677,14 @@ export default function App() {
         phase: isBonus ? 'ANSWERING' : 'READING',
         buzzedContestantId: isBonus ? pickerId : null,
         buzzerLockout: {coach: false, player: false, analyst: false, player2: false},
-        timer: isBonus ? 12.0 : SETTINGS.buzzerLightDelay,
-        maxTimer: isBonus ? 12.0 : SETTINGS.buzzerLightDelay,
+        // A Daily Double's clock waits for the wager.
+        ...(isBonus ? frozenCountdown(TIMES.dailyDouble) : startCountdown(SETTINGS.buzzerLightDelay, Date.now())),
         options,
         isBonusWager: isBonus,
         bonusSelectingPlayerId: pickerId,
         bonusWagerInput: isBonus
           ? isHumanSeat(pickerId)
-            ? Math.min(roundMaxClue, maxWager)
+            ? defaultDailyDoubleWager(currentRound, pickerScore)
             : aiWager
           : clue.value,
         bonusWagerLocked: false, // Daily Double starts UNLOCKED so clue text is completely obscured/hidden!
@@ -742,22 +725,20 @@ export default function App() {
     if (pickerId === 'analyst' && player3Human) return;
 
     const timer = setTimeout(() => {
-      setActiveClue((prev) => {
-        if (!prev || !prev.isBonusWager || prev.bonusWagerLocked) return prev;
-        gameAudio.playConfirmSelect();
-        const pName = contestants[pickerId]?.name || 'Opponent';
-        return {
-          ...prev,
-          bonusWagerLocked: true,
-          timer: SETTINGS.questionTimeLimit || 12.0,
-          maxTimer: SETTINGS.questionTimeLimit || 12.0,
-          feedbackText: `${pName} locked in wager at $${prev.bonusWagerInput.toLocaleString()}! Reading clue...`,
-        };
+      const prev = activeClueRef.current;
+      if (!prev || !prev.isBonusWager || prev.bonusWagerLocked) return;
+      gameAudio.playConfirmSelect();
+      const pName = contestantsRef.current[pickerId]?.name || 'Opponent';
+      commitClue({
+        ...prev,
+        ...startCountdown(TIMES.dailyDouble, Date.now()),
+        bonusWagerLocked: true,
+        feedbackText: `${pName} locked in wager at $${prev.bonusWagerInput.toLocaleString()}! Reading clue...`,
       });
     }, 1800);
 
     return () => clearTimeout(timer);
-  }, [deviceRole, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, activeClue?.bonusSelectingPlayerId, contestants, player3Human]);
+  }, [deviceRole, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, activeClue?.bonusSelectingPlayerId, player3Human]);
 
   // Initialize and start match
   const startMatch = useCallback(() => {
@@ -825,8 +806,9 @@ export default function App() {
       bonusWagersHit: 0,
     });
 
-    setActiveClue(null);
+    commitClue(null);
     setFinalShowdownPhase('WAGER');
+    setFinalTimer(frozenCountdown(TIMES.final));
     setFinalPlayerInput('');
     setFinalPlayer2Input('');
     setPlayerFinalWager(1000);
@@ -865,7 +847,7 @@ export default function App() {
     const isAI = contestantId === 'coach' || (contestantId === 'analyst' && !player3Human);
     const name = contestantsRef.current[contestantId]?.name || 'Player';
     // AI answers quickly; mic-only answers get a little longer, so a missed word can be said again.
-    const seconds = isAI ? 3.5 : answerMode === 'VOICE' ? 10.0 : 8.0;
+    const seconds = isAI ? TIMES.aiAnswer : answerMode === 'VOICE' ? TIMES.voiceAnswer : TIMES.humanAnswer;
 
     if (isAI) {
       gameAudio.playHoverMicroTone();
@@ -878,20 +860,16 @@ export default function App() {
     }
     setContestants((c) => ({...c, [contestantId]: {...c[contestantId], reaction: 'buzzing'}}));
 
-    setActiveClue((prev) => {
-      if (!prev || prev.clue.id !== clueId || prev.phase !== 'BUZZER_OPEN' || prev.buzzedContestantId) return prev;
-      return {
-        ...prev,
-        phase: 'ANSWERING',
-        buzzedContestantId: contestantId,
-        timer: seconds,
-        maxTimer: seconds,
-        feedbackText: isAI
-          ? `${name} buzzed in!`
-          : answerMode === 'VOICE'
-          ? `${name}'s Turn! Say your answer!`
-          : `${name}'s Turn! Select or type your answer!`,
-      };
+    commitClue({
+      ...current,
+      ...startCountdown(seconds, Date.now()),
+      phase: 'ANSWERING',
+      buzzedContestantId: contestantId,
+      feedbackText: isAI
+        ? `${name} buzzed in!`
+        : answerMode === 'VOICE'
+        ? `${name}'s Turn! Say your answer!`
+        : `${name}'s Turn! Select or type your answer!`,
     });
   };
   const awardBuzzRef = useRef(awardBuzz);
@@ -940,112 +918,53 @@ export default function App() {
     registerBuzz(contestantId, pressedAt);
   };
 
-  // Host handling contestant answer submission
-  const handleContestantSubmitAnswer = useCallback(
-    (answer: string, answeringId: 'player' | RemoteSeat, spokenGuesses?: string[]) => {
-      if (!activeClue || activeClue.phase !== 'ANSWERING' || activeClue.buzzedContestantId !== answeringId) return;
+  // Score an answer to the open clue (a person's, an AI's, or a timeout) and move the clue on.
+  const applyAnswer = (who: ContestantId, correct: boolean, how: AnswerHow) => {
+    const prev = activeClueRef.current;
+    if (!prev || prev.phase !== 'ANSWERING' || prev.buzzedContestantId !== who) return;
+    const stake = clueStake(prev);
 
-      const isBonus = activeClue.isBonusWager;
-      const wagerAmount = isBonus ? activeClue.bonusWagerInput : activeClue.clue.value;
-      const threshold = SETTINGS.fuzzyMatchThreshold;
-      // Phones don't get the answer, so they send all the recognizer's guesses and the host picks.
-      if (spokenGuesses?.length && isOpenAnswerMode(answerMode)) {
-        answer = pickSpokenTypedAnswer(spokenGuesses, activeClue.clue, threshold) || answer;
+    if (correct) {
+      gameAudio.playCoinPickup();
+      if (prev.isBonusWager && how.kind === 'player') {
+        gameAudio.playLevelUpStinger();
+        setMatchStats((ms) => ({...ms, bonusWagersHit: ms.bonusWagersHit + 1}));
       }
+      // Whoever answers correctly gets control of the board.
+      setActiveSelector(who);
+    } else {
+      gameAudio.playErrorBuzz();
+    }
+    if (who === 'player') {
+      const before = contestantsRef.current.player.score;
+      setMatchStats((ms) =>
+        correct
+          ? {...ms, playerCorrect: ms.playerCorrect + 1, highestScore: Math.max(ms.highestScore, before + stake)}
+          : {...ms, playerWrong: ms.playerWrong + 1}
+      );
+    }
+    setContestants((c) => ({...c, [who]: scoreAnswer(c[who], stake, correct, prev.isBonusWager)}));
 
-      const isCorrect =
-        isOpenAnswerMode(answerMode)
-          ? checkTypedAnswer(answer, activeClue.clue, threshold)
-          : answer.trim().toLowerCase() === activeClue.clue.correctAnswer.trim().toLowerCase();
+    const name = contestantsRef.current[who]?.name || (how.kind === 'ai' ? 'Opponent' : 'Player');
+    commitClue(resolveAnswer(prev, who, correct, how, {name, buzzerSeats, now: Date.now()}));
+  };
+  const applyAnswerRef = useRef(applyAnswer);
+  applyAnswerRef.current = applyAnswer;
 
-      const pName = contestants[answeringId]?.name || 'Player';
-
-      if (isCorrect) {
-        gameAudio.playCoinPickup();
-        if (isBonus) {
-          gameAudio.playLevelUpStinger();
-          setMatchStats((ms) => ({...ms, bonusWagersHit: ms.bonusWagersHit + 1}));
-        }
-
-        setContestants((c) => ({
-          ...c,
-          [answeringId]: {
-            ...c[answeringId],
-            score: c[answeringId].score + wagerAmount,
-            reaction: 'correct',
-            correctCount: c[answeringId].correctCount + 1,
-            bonusHits: (c[answeringId].bonusHits || 0) + (isBonus ? 1 : 0),
-          },
-        }));
-
-        if (answeringId === 'player') {
-          setMatchStats((ms) => ({
-            ...ms,
-            playerCorrect: ms.playerCorrect + 1,
-            highestScore: Math.max(ms.highestScore, contestants.player.score + wagerAmount),
-          }));
-        }
-
-        // Contestant who answered correctly gets control of the board!
-        setActiveSelector(answeringId);
-
-        setActiveClue((prev) => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            phase: 'REVEALED',
-            selectedOption: answer,
-            timer: 2.8,
-            feedbackText: `CORRECT! ${pName} earned +$${wagerAmount.toLocaleString()} and won Board Control!`,
-          };
-        });
-      } else {
-        gameAudio.playErrorBuzz();
-        setContestants((c) => ({
-          ...c,
-          [answeringId]: {
-            ...c[answeringId],
-            score: c[answeringId].score - wagerAmount,
-            reaction: 'wrong',
-            wrongCount: c[answeringId].wrongCount + 1,
-          },
-        }));
-
-        if (answeringId === 'player') {
-          setMatchStats((ms) => ({...ms, playerWrong: ms.playerWrong + 1}));
-        }
-
-        const newLockouts = {...activeClue.buzzerLockout, [answeringId]: true};
-        const allLocked = buzzerSeats.every((id) => newLockouts[id]);
-
-        if (isBonus || allLocked) {
-          setActiveClue((prev) => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              phase: 'REVEALED',
-              selectedOption: answer,
-              timer: 3.0,
-              feedbackText: `INCORRECT! (-$${wagerAmount.toLocaleString()}) Correct answer: ${prev.clue.correctAnswer}`,
-            };
-          });
-        } else {
-          setActiveClue((prev) => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              phase: 'BUZZER_OPEN',
-              buzzedContestantId: null,
-              buzzerLockout: newLockouts,
-              timer: 4.5,
-              feedbackText: `${pName} was Incorrect (-$${wagerAmount.toLocaleString()}). Buzzers re-opened!`,
-            };
-          });
-        }
-      }
-    },
-    [activeClue, answerMode, contestants, buzzerSeats]
-  );
+  // Host: a person answered (Player 1 here, or a friend's phone).
+  const handleContestantSubmitAnswer = (answer: string, answeringId: 'player' | RemoteSeat, spokenGuesses?: string[]) => {
+    const current = activeClueRef.current;
+    if (!current || current.phase !== 'ANSWERING' || current.buzzedContestantId !== answeringId) return;
+    const threshold = SETTINGS.fuzzyMatchThreshold;
+    // Phones don't get the answer, so they send all the recognizer's guesses and the host picks.
+    if (spokenGuesses?.length && isOpenAnswerMode(answerMode)) {
+      answer = pickSpokenTypedAnswer(spokenGuesses, current.clue, threshold) || answer;
+    }
+    const isCorrect = isOpenAnswerMode(answerMode)
+      ? checkTypedAnswer(answer, current.clue, threshold)
+      : answer.trim().toLowerCase() === current.clue.correctAnswer.trim().toLowerCase();
+    applyAnswer(answeringId, isCorrect, {kind: 'player', answer});
+  };
 
   // P2P Message Dispatcher for Host & Client
   const handleP2PMessage = useCallback(
@@ -1127,31 +1046,28 @@ export default function App() {
             break;
 
           case 'CLIENT_SET_WAGER':
-            setActiveClue((prev) => {
-              if (!prev || !prev.isBonusWager || prev.bonusSelectingPlayerId !== seat || prev.bonusWagerLocked) return prev;
-              const isLock = Boolean(msg.lockIn);
-              const maxWager = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[seat]?.score || 0);
-              const wager = Math.max(5, Math.min(maxWager, Math.round(Number(msg.wager)) || 5));
-              if (isLock) {
-                gameAudio.playConfirmSelect();
-              }
-              return {
-                ...prev,
-                bonusWagerInput: wager,
-                bonusWagerLocked: isLock,
-                timer: isLock ? 12.0 : prev.timer,
-                maxTimer: isLock ? 12.0 : prev.maxTimer,
-                feedbackText: isLock
-                  ? `${contestants[seat]?.name || seatLabel(seat)} locked wager at $${wager.toLocaleString()}! Provide answer.`
-                  : prev.feedbackText,
-              };
+          {
+            const prev = activeClueRef.current;
+            if (!prev || !prev.isBonusWager || prev.bonusSelectingPlayerId !== seat || prev.bonusWagerLocked) break;
+            const wager = clampDailyDoubleWager(msg.wager, currentRound, contestants[seat]?.score || 0);
+            if (!msg.lockIn) {
+              commitClue({...prev, bonusWagerInput: wager});
+              break;
+            }
+            gameAudio.playConfirmSelect();
+            commitClue({
+              ...prev,
+              ...startCountdown(TIMES.dailyDouble, Date.now()),
+              bonusWagerInput: wager,
+              bonusWagerLocked: true,
+              feedbackText: `${contestants[seat]?.name || seatLabel(seat)} locked wager at $${wager.toLocaleString()}! Provide answer.`,
             });
             break;
+          }
 
           case 'CLIENT_FINAL_WAGER': {
             if (finalShowdownPhase !== 'WAGER' || finalLocks.wager[seat]) break;
-            const maxWager = Math.max(1000, contestants[seat]?.score || 0);
-            const wager = Math.max(0, Math.min(maxWager, Math.round(Number(msg.wager)) || 0));
+            const wager = clampFinalWager(msg.wager, contestants[seat]?.score || 0);
             if (seat === 'player2') setPlayer2FinalWager(wager);
             else setPlayer3FinalWager(wager);
             if (msg.lockIn) setFinalLocks((l) => ({...l, wager: {...l.wager, [seat]: true}}));
@@ -1192,12 +1108,12 @@ export default function App() {
           if (s.answeredClueIds) setAnsweredClueIds(new Set(s.answeredClueIds));
           if (s.activeSelector) setActiveSelector(s.activeSelector);
           if (s.contestants) setContestants(s.contestants);
-          if (s.activeClue !== undefined) setActiveClue(s.activeClue);
+          if (s.activeClue !== undefined) setActiveClue(s.activeClue && countdownFromSync(s.activeClue, Date.now()));
           if (s.difficulty) setDifficulty(s.difficulty);
           if (s.answerMode) setAnswerMode(s.answerMode);
           if (s.finalClue) setFinalClue(s.finalClue);
           if (s.finalShowdownPhase) setFinalShowdownPhase(s.finalShowdownPhase);
-          if (s.finalShowdownTimer !== undefined) setFinalShowdownTimer(s.finalShowdownTimer);
+          if (s.finalTimer) setFinalTimer(countdownFromSync(s.finalTimer, Date.now()));
           if (s.finalLocks) setFinalLocks(s.finalLocks);
           if (s.finalOptions) setFinalOptions(s.finalOptions);
         }
@@ -1271,7 +1187,7 @@ export default function App() {
 
   // Host sends STATE_SYNC broadcasts to joined friends in two parts. The boards and settings
   // (most of the data) only go out when they change or someone joins. The live part goes out on
-  // every change, which is ten times a second while a clue timer runs.
+  // whenever play moves on. Clocks aren't sent each tick: phones get how long is left and count down themselves.
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
     // Phones only need each tile's value; answers and Daily Double spots stay on the host.
@@ -1302,9 +1218,10 @@ export default function App() {
         activeSelector,
         contestants,
         activeClue:
-          activeClue && activeClue.phase !== 'REVEALED' ? {...activeClue, clue: hideAnswer(activeClue.clue)} : activeClue,
+          activeClue &&
+          countdownForSync(activeClue.phase !== 'REVEALED' ? {...activeClue, clue: hideAnswer(activeClue.clue)} : activeClue, Date.now()),
         finalShowdownPhase,
-        finalShowdownTimer,
+        finalTimer: countdownForSync(finalTimer, Date.now()),
         finalLocks,
       },
     });
@@ -1317,7 +1234,7 @@ export default function App() {
     contestants,
     activeClue,
     finalShowdownPhase,
-    finalShowdownTimer,
+    finalTimer,
     finalLocks,
     remoteSeats,
   ]);
@@ -1415,135 +1332,76 @@ export default function App() {
     player3Human,
   ]);
 
-  // Main active clue timer and buzzer loop (Authoritative on Host)
+  // Host: when the open clue's clock runs out, move it to the next phase.
+  const onClueTimeUp = () => {
+    const prev = activeClueRef.current;
+    if (!prev || prev.endsAt === null) return;
+    const step = clueTimeUp(prev, SETTINGS.questionTimeLimit, Date.now());
+    if (step.kind === 'buzzers-open') {
+      gameAudio.playHoverMicroTone();
+      commitClue(step.next);
+    } else if (step.kind === 'nobody-buzzed') {
+      gameAudio.playErrorBuzz();
+      commitClue(step.next);
+    } else if (step.kind === 'answer-timed-out') {
+      applyAnswer(step.who, false, {kind: 'timeout'});
+    } else {
+      // The answer has been shown long enough: back to the board.
+      setAnsweredClueIds((ids) => new Set([...ids, prev.clue.id]));
+      setMatchStats((ms) => ({...ms, totalQuestions: ms.totalQuestions + 1}));
+      setContestants((c) => ({
+        coach: {...c.coach, reaction: 'idle'},
+        player: {...c.player, reaction: 'idle'},
+        analyst: {...c.analyst, reaction: 'idle'},
+        player2: {...c.player2, reaction: 'idle'},
+      }));
+      commitClue(null);
+    }
+  };
+  const onClueTimeUpRef = useRef(onClueTimeUp);
+  onClueTimeUpRef.current = onClueTimeUp;
+
+  // Clocks stop while a menu is open on the host.
+  const clocksPaused =
+    gameState.status !== 'PLAYING' || isGameMenuOpen || isHowToPlayOpen || isInviteModalOpen || isLeaderboardOpen || isTagEditorOpen;
+
+  // Host: one timeout for the end of the clue's current clock, instead of ticking ten times a second.
   useEffect(() => {
-    if (
-      deviceRole !== 'HOST' ||
-      !activeClue ||
-      gameState.status !== 'PLAYING' ||
-      isGameMenuOpen ||
-      isHowToPlayOpen ||
-      isInviteModalOpen ||
-      isLeaderboardOpen ||
-      isTagEditorOpen
-    ) {
+    if (deviceRole !== 'HOST' || clocksPaused || !activeClue || activeClue.endsAt === null) return;
+    const timeout = setTimeout(() => onClueTimeUpRef.current(), Math.max(0, activeClue.endsAt - Date.now()));
+    return () => clearTimeout(timeout);
+  }, [deviceRole, clocksPaused, activeClue?.endsAt]);
+
+  // Host: freeze the running clocks when a menu opens and restart them where they were when it closes.
+  // A Daily Double waiting for its wager is frozen on purpose, so only clocks this paused are restarted.
+  const pausedClueIdRef = useRef<string | null>(null);
+  const pausedFinalRef = useRef(false);
+  useEffect(() => {
+    if (deviceRole !== 'HOST') return;
+    const now = Date.now();
+    const current = activeClueRef.current;
+    if (clocksPaused) {
+      if (current && current.endsAt !== null) {
+        pausedClueIdRef.current = current.clue.id;
+        commitClue(pauseCountdown(current, now));
+      }
+      setFinalTimer((t) => {
+        if (t.endsAt === null) return t;
+        pausedFinalRef.current = true;
+        return pauseCountdown(t, now);
+      });
       return;
     }
-
-    const interval = setInterval(() => {
-      setActiveClue((prev) => {
-        if (!prev) return null;
-
-        // 1. Reading Phase -> Countdown to Buzzer Open
-        if (prev.phase === 'READING') {
-          const nextTime = prev.timer - 0.1;
-          if (nextTime <= 0) {
-            gameAudio.playHoverMicroTone();
-            return {
-              ...prev,
-              phase: 'BUZZER_OPEN',
-              timer: SETTINGS.questionTimeLimit,
-              maxTimer: SETTINGS.questionTimeLimit,
-              feedbackText: 'BUZZERS ACTIVE! Buzz in now!',
-            };
-          }
-          return {...prev, timer: nextTime};
-        }
-
-        // 2. Buzzer Open Phase -> Countdown until time expires
-        if (prev.phase === 'BUZZER_OPEN') {
-          const nextTime = prev.timer - 0.1;
-          if (nextTime <= 0) {
-            gameAudio.playErrorBuzz();
-            return {
-              ...prev,
-              phase: 'REVEALED',
-              timer: 3.0,
-              feedbackText: `Time's up! Correct answer: ${prev.clue.correctAnswer}`,
-            };
-          }
-          return {...prev, timer: nextTime};
-        }
-
-        // 3. Answering Phase -> Answering countdown (Paused while Daily Double is unlocking/wager pending)
-        if (prev.phase === 'ANSWERING') {
-          if (prev.isBonusWager && !prev.bonusWagerLocked) {
-            return prev;
-          }
-
-          const nextTime = prev.timer - 0.1;
-          if (nextTime <= 0) {
-            const buzzedId = prev.buzzedContestantId;
-            if (buzzedId) {
-              gameAudio.playErrorBuzz();
-              const deduction = prev.isBonusWager ? prev.bonusWagerInput : prev.clue.value;
-
-              setContestants((c) => ({
-                ...c,
-                [buzzedId]: {
-                  ...c[buzzedId],
-                  score: c[buzzedId].score - deduction,
-                  reaction: 'wrong',
-                  wrongCount: c[buzzedId].wrongCount + 1,
-                },
-              }));
-
-              if (buzzedId === 'player' || buzzedId === 'player2') {
-                setMatchStats((ms) => ({...ms, playerWrong: ms.playerWrong + 1}));
-              }
-
-              const newLockouts = {...prev.buzzerLockout, [buzzedId]: true};
-              const allLocked = buzzerSeats.every((id) => newLockouts[id]);
-
-              if (prev.isBonusWager || allLocked) {
-                return {
-                  ...prev,
-                  phase: 'REVEALED',
-                  timer: 3.0,
-                  feedbackText: `Time expired! Correct answer: ${prev.clue.correctAnswer}`,
-                };
-              }
-
-              const contestantName = contestants[buzzedId]?.name || 'Contestant';
-              return {
-                ...prev,
-                phase: 'BUZZER_OPEN',
-                buzzedContestantId: null,
-                buzzerLockout: newLockouts,
-                timer: 5.0,
-                feedbackText: `${contestantName} timed out! Buzzers re-opened!`,
-              };
-            }
-          }
-          return {...prev, timer: nextTime};
-        }
-
-        // 4. Revealed Phase -> Clue finished
-        if (prev.phase === 'REVEALED') {
-          const nextTime = prev.timer - 0.1;
-          if (nextTime <= 0) {
-            setAnsweredClueIds((ids) => new Set([...ids, prev.clue.id]));
-            setMatchStats((ms) => ({...ms, totalQuestions: ms.totalQuestions + 1}));
-
-            setContestants((c) => ({
-              ...c,
-              coach: {...c.coach, reaction: 'idle'},
-              player: {...c.player, reaction: 'idle'},
-              analyst: {...c.analyst, reaction: 'idle'},
-              player2: {...c.player2, reaction: 'idle'},
-            }));
-
-            return null;
-          }
-          return {...prev, timer: nextTime};
-        }
-
-        return prev;
-      });
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [deviceRole, activeClue, gameState.status, isGameMenuOpen, isHowToPlayOpen, isInviteModalOpen, isLeaderboardOpen, isTagEditorOpen, buzzerSeats, contestants]);
+    if (current && current.endsAt === null && pausedClueIdRef.current === current.clue.id) {
+      commitClue(resumeCountdown(current, now));
+    }
+    pausedClueIdRef.current = null;
+    if (pausedFinalRef.current) {
+      pausedFinalRef.current = false;
+      setFinalTimer((t) => resumeCountdown(t, now));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, clocksPaused]);
 
   // AI Buzzer Simulation when BUZZER_OPEN (Host only)
   useEffect(() => {
@@ -1588,78 +1446,22 @@ export default function App() {
     const isCoach = buzzedId === 'coach';
     const accuracy = isCoach ? aiConfig.coachAcc : aiConfig.analystAcc;
     const isCorrect = Math.random() < accuracy;
-    const isBonus = activeClue.isBonusWager;
-    const clueValue = isBonus ? activeClue.bonusWagerInput : activeClue.clue.value;
-
     const thinkTime = 1400 + Math.random() * 1200;
 
     const timer = setTimeout(() => {
-      setActiveClue((prev) => {
-        if (!prev || prev.phase !== 'ANSWERING' || prev.buzzedContestantId !== buzzedId) return prev;
-
-        const contestantName = contestants[buzzedId]?.name || 'Opponent';
-        const answerText = isCorrect
-          ? prev.clue.correctAnswer
-          : prev.clue.distractors[Math.floor(Math.random() * prev.clue.distractors.length)];
-
-        if (isCorrect) {
-          gameAudio.playCoinPickup();
-          setContestants((c) => ({
-            ...c,
-            [buzzedId]: {
-              ...c[buzzedId],
-              score: c[buzzedId].score + clueValue,
-              reaction: 'correct',
-              correctCount: c[buzzedId].correctCount + 1,
-            },
-          }));
-
-          setActiveSelector(buzzedId);
-
-          return {
-            ...prev,
-            phase: 'REVEALED',
-            timer: 2.8,
-            feedbackText: `${contestantName} is CORRECT with "${answerText}"! (+$${clueValue.toLocaleString()})`,
-          };
-        } else {
-          gameAudio.playErrorBuzz();
-          setContestants((c) => ({
-            ...c,
-            [buzzedId]: {
-              ...c[buzzedId],
-              score: c[buzzedId].score - clueValue,
-              reaction: 'wrong',
-              wrongCount: c[buzzedId].wrongCount + 1,
-            },
-          }));
-
-          const newLockouts = {...prev.buzzerLockout, [buzzedId]: true};
-          const allLocked = buzzerSeats.every((id) => newLockouts[id]);
-
-          if (isBonus || allLocked) {
-            return {
-              ...prev,
-              phase: 'REVEALED',
-              timer: 3.0,
-              feedbackText: `${contestantName} said "${answerText}" (Incorrect). Correct was: ${prev.clue.correctAnswer}`,
-            };
-          }
-
-          return {
-            ...prev,
-            phase: 'BUZZER_OPEN',
-            buzzedContestantId: null,
-            buzzerLockout: newLockouts,
-            timer: 4.5,
-            feedbackText: `${contestantName} said "${answerText}" (Incorrect, -$${clueValue.toLocaleString()}). Buzzers re-opened!`,
-          };
-        }
-      });
+      const clue = activeClue.clue;
+      // A wrong AI answer is one of the choices everyone else can see.
+      const wrongChoices = activeClue.options.length
+        ? activeClue.options.filter((o) => o !== clue.correctAnswer)
+        : clue.distractors;
+      const answer = isCorrect
+        ? clue.correctAnswer
+        : wrongChoices[Math.floor(Math.random() * wrongChoices.length)] || 'no idea';
+      applyAnswerRef.current(buzzedId, isCorrect, {kind: 'ai', answer});
     }, thinkTime);
 
     return () => clearTimeout(timer);
-  }, [deviceRole, activeClue?.phase, activeClue?.buzzedContestantId, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, aiConfig, contestants, buzzerSeats, player3Human]);
+  }, [deviceRole, activeClue?.phase, activeClue?.buzzedContestantId, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, aiConfig, player3Human]);
 
   // Spacebar, Enter, number (1-8), and letter (A-H) shortcuts for buzzing and answering
   useEffect(() => {
@@ -1753,9 +1555,9 @@ export default function App() {
       gameAudio.playPowerupChime();
       setCurrentRound('FINAL_SHOWDOWN');
       setFinalShowdownPhase('WAGER');
-      setPlayerFinalWager(Math.max(1000, contestants.player.score));
-      setPlayer2FinalWager(Math.max(1000, contestants.player2.score));
-      setPlayer3FinalWager(Math.max(1000, contestants.analyst.score));
+      setPlayerFinalWager(maxFinalWager(contestants.player.score));
+      setPlayer2FinalWager(maxFinalWager(contestants.player2.score));
+      setPlayer3FinalWager(maxFinalWager(contestants.analyst.score));
       setFinalLocks(NO_FINAL_LOCKS);
       setFinalOptions(finalClue ? generateOptions(finalClue, answerMode) : []);
     }
@@ -1764,7 +1566,7 @@ export default function App() {
   // Client: start the Final Showdown wager box at the same amount the host assumes (the whole bank).
   useEffect(() => {
     if (deviceRole !== 'CLIENT' || currentRound !== 'FINAL_SHOWDOWN') return;
-    setPlayer2FinalWager(Math.max(1000, contestants[mySeat].score));
+    setPlayer2FinalWager(maxFinalWager(contestants[mySeat].score));
     setFinalPlayer2Input('');
     // Only when the round starts, not on every score sync.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1779,13 +1581,6 @@ export default function App() {
   const confirmFinalWagers = useCallback(() => {
     gameAudio.playConfirmSelect();
 
-    const calculateAIWager = (score: number, isLeader: boolean) => {
-      const bank = Math.max(1000, score);
-      if (score <= 0) return 1000;
-      if (isLeader) return Math.floor(bank * 0.65);
-      return Math.floor(bank * (0.8 + Math.random() * 0.2));
-    };
-
     const maxScore = Math.max(
       contestants.coach.score,
       contestants.analyst.score,
@@ -1797,11 +1592,11 @@ export default function App() {
       ...c,
       coach: {
         ...c.coach,
-        wager: calculateAIWager(c.coach.score, c.coach.score === maxScore),
+        wager: aiFinalWager(c.coach.score, c.coach.score === maxScore),
       },
       analyst: {
         ...c.analyst,
-        wager: player3Human ? player3FinalWager : calculateAIWager(c.analyst.score, c.analyst.score === maxScore),
+        wager: player3Human ? player3FinalWager : aiFinalWager(c.analyst.score, c.analyst.score === maxScore),
       },
       player: {
         ...c.player,
@@ -1814,7 +1609,7 @@ export default function App() {
     }));
 
     setFinalShowdownPhase('CLUE');
-    setFinalShowdownTimer(30);
+    setFinalTimer(startCountdown(TIMES.final, Date.now()));
   }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, player2Away, isTwoPlayerMode, isClientConnected]);
 
   // Record every human player's result on this device's leaderboard. The celebration is for Player 1.
@@ -1853,11 +1648,7 @@ export default function App() {
     if (!finalClue || finalShowdownPhase !== 'CLUE') return;
 
     const threshold = SETTINGS.fuzzyMatchThreshold;
-    // Multiple choice needs the exact option; typed answers get the usual spelling tolerance.
-    const isRight = (input: string) =>
-      finalOptions.length
-        ? input.trim().toLowerCase() === finalClue.correctAnswer.trim().toLowerCase()
-        : checkTypedAnswer(input, finalClue, threshold);
+    const isRight = (input: string) => isFinalAnswerRight(input, finalClue, finalOptions, threshold);
     const playerCorrect = isRight(finalPlayerInput);
     const player2Correct = (isTwoPlayerMode || isClientConnected) ? isRight(finalPlayer2Input) : false;
 
@@ -1954,28 +1745,17 @@ export default function App() {
     if (allFinalAnswersLocked) finalizeFinalShowdownRef.current();
   }, [deviceRole, finalShowdownPhase, allFinalAnswersLocked, onlineRemoteSeats.length]);
 
-  // The countdown reads the latest finalize through a ref. Depending on it directly restarted
-  // the 1-second interval on every keystroke, so the clock stalled while anyone typed.
+  // The Final's clock reads the latest finalize through a ref, so typing doesn't restart it.
   const finalizeFinalShowdownRef = useRef(finalizeFinalShowdown);
   finalizeFinalShowdownRef.current = finalizeFinalShowdown;
 
-  // Final Showdown Clue Timer Loop (Host)
+  // Host: end the Final when its clock runs out.
   useEffect(() => {
-    if (deviceRole !== 'HOST' || currentRound !== 'FINAL_SHOWDOWN' || finalShowdownPhase !== 'CLUE' || gameState.status !== 'PLAYING' || isGameMenuOpen || isLeaderboardOpen || isTagEditorOpen) return;
-
-    const interval = setInterval(() => {
-      setFinalShowdownTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setTimeout(() => finalizeFinalShowdownRef.current(), 0);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [deviceRole, currentRound, finalShowdownPhase, gameState.status, isGameMenuOpen, isLeaderboardOpen, isTagEditorOpen]);
+    if (deviceRole !== 'HOST' || currentRound !== 'FINAL_SHOWDOWN' || finalShowdownPhase !== 'CLUE' || clocksPaused) return;
+    if (finalTimer.endsAt === null) return;
+    const timeout = setTimeout(() => finalizeFinalShowdownRef.current(), Math.max(0, finalTimer.endsAt - Date.now()));
+    return () => clearTimeout(timeout);
+  }, [deviceRole, currentRound, finalShowdownPhase, clocksPaused, finalTimer.endsAt]);
 
   // Copy Room Link to Clipboard
   const handleCopyInviteLink = useCallback(() => {
@@ -2166,7 +1946,7 @@ export default function App() {
                 <div className="w-full py-8 px-4 rounded-2xl bg-rose-950/70 border-2 border-rose-600 text-center flex flex-col items-center gap-2 animate-pulse">
                   <Clock className="w-8 h-8 text-rose-400" />
                   <span className="text-sm font-black text-rose-200">WAIT FOR HOST LIGHT TO BUZZ</span>
-                  <span className="text-xs text-rose-400 font-mono">Buzzer opens in {activeClue.timer.toFixed(1)}s</span>
+                  <span className="text-xs text-rose-400 font-mono">Buzzer opens in <TimeLeft c={activeClue} />s</span>
                 </div>
               )}
 
@@ -2199,7 +1979,7 @@ export default function App() {
 
               {/* C. Daily Double Wager for this phone's player. Typed here, sent to the host on confirm. */}
               {isDailyDoubleForMe && !activeClue.bonusWagerLocked && (() => {
-                const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[mySeat].score);
+                const maxVal = maxDailyDoubleWager(currentRound, contestants[mySeat].score);
                 const wager = Math.max(5, Math.min(maxVal, parseInt(clientWager) || 5));
                 return (
                 <div className="w-full bg-slate-900 border-2 border-amber-400 rounded-2xl p-4 flex flex-col items-center gap-3">
@@ -2256,7 +2036,7 @@ export default function App() {
               {activeClue.phase === 'ANSWERING' && isPlayer2Buzzed && (!activeClue.isBonusWager || activeClue.bonusWagerLocked) && (
                 <div className="w-full flex flex-col gap-2">
                   <div className="text-xs font-black text-emerald-400 text-center uppercase animate-bounce">
-                    YOUR TURN TO ANSWER! ({activeClue.timer.toFixed(1)}s)
+                    YOUR TURN TO ANSWER! (<TimeLeft c={activeClue} />s)
                   </div>
 
                   {answerMode === 'VOICE' && isVoiceSupported ? (
@@ -2391,7 +2171,7 @@ export default function App() {
 
           {/* 4. Final Showdown for this phone's player: lock a wager, then lock an answer */}
           {gameState.status === 'PLAYING' && currentRound === 'FINAL_SHOWDOWN' && (() => {
-            const maxWager = Math.max(1000, contestants[mySeat].score);
+            const maxWager = maxFinalWager(contestants[mySeat].score);
             const wagerLocked = Boolean(finalLocks.wager[mySeat]);
             const answerLocked = Boolean(finalLocks.answer[mySeat]);
             const sendAnswer = (answer: string, lockIn = false) =>
@@ -2443,7 +2223,7 @@ export default function App() {
 
               {finalShowdownPhase === 'CLUE' && (
                 <div className="w-full flex flex-col gap-2">
-                  <div className="text-xs font-mono text-rose-400 font-bold">Time Left: {finalShowdownTimer}s</div>
+                  <div className="text-xs font-mono text-rose-400 font-bold">Time Left: <TimeLeft c={finalTimer} format="seconds" />s</div>
                   <div className="p-3 bg-slate-950 rounded-lg text-xs font-medium text-slate-200 border border-blue-800">
                     {finalClue?.clue}
                   </div>
@@ -2833,21 +2613,21 @@ export default function App() {
                         <input
                           type="number"
                           min={0}
-                          max={Math.max(1000, contestants.player.score)}
+                          max={maxFinalWager(contestants.player.score)}
                           step={100}
                           value={playerFinalWager}
                           onChange={(e) =>
                             setPlayerFinalWager(
                               Math.max(
                                 0,
-                                Math.min(Math.max(1000, contestants.player.score), parseInt(e.target.value) || 0)
+                                Math.min(maxFinalWager(contestants.player.score), parseInt(e.target.value) || 0)
                               )
                             )
                           }
                           className="flex-1 bg-slate-900 border border-amber-400 text-amber-400 text-base font-black px-3 py-1.5 rounded-lg text-center"
                         />
                         <button
-                          onClick={() => setPlayerFinalWager(Math.max(1000, contestants.player.score))}
+                          onClick={() => setPlayerFinalWager(maxFinalWager(contestants.player.score))}
                           className="text-[10px] px-2 py-1.5 bg-blue-950 hover:bg-blue-800 text-blue-200 border border-blue-700 rounded font-bold">
                           MAX
                         </button>
@@ -2875,21 +2655,21 @@ export default function App() {
                           <input
                             type="number"
                             min={0}
-                            max={Math.max(1000, contestants.player2.score)}
+                            max={maxFinalWager(contestants.player2.score)}
                             step={100}
                             value={player2FinalWager}
                             onChange={(e) =>
                               setPlayer2FinalWager(
                                 Math.max(
                                   0,
-                                  Math.min(Math.max(1000, contestants.player2.score), parseInt(e.target.value) || 0)
+                                  Math.min(maxFinalWager(contestants.player2.score), parseInt(e.target.value) || 0)
                                 )
                               )
                             }
                             className="flex-1 bg-slate-900 border border-amber-400 text-amber-400 text-base font-black px-3 py-1.5 rounded-lg text-center"
                           />
                           <button
-                            onClick={() => setPlayer2FinalWager(Math.max(1000, contestants.player2.score))}
+                            onClick={() => setPlayer2FinalWager(maxFinalWager(contestants.player2.score))}
                             className="text-[10px] px-2 py-1.5 bg-blue-950 hover:bg-blue-800 text-blue-200 border border-blue-700 rounded font-bold">
                             MAX
                           </button>
@@ -2912,7 +2692,7 @@ export default function App() {
                 <div className="w-full flex flex-col items-center gap-3">
                   <div className="flex items-center gap-2 text-rose-400 text-base sm:text-lg font-black bg-rose-950/60 px-4 py-1.5 rounded-full border border-rose-700 animate-pulse">
                     <Clock className="w-5 h-5" />
-                    <span>0:{finalShowdownTimer.toString().padStart(2, '0')}</span>
+                    <span><TimeLeft c={finalTimer} format="clock" /></span>
                   </div>
 
                   <div className="w-full bg-slate-950/90 border border-blue-800 rounded-xl p-3 sm:p-4 text-xs sm:text-base text-slate-100 font-medium leading-relaxed">
@@ -3192,19 +2972,19 @@ export default function App() {
               {!activeClue.isBonusWager && activeClue.phase === 'READING' && (
                 <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-rose-950/80 border border-rose-700 text-rose-300 text-xs font-bold animate-pulse">
                   <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                  <span>READING CLUE... (BUZZER OPENS IN {activeClue.timer.toFixed(1)}s)</span>
+                  <span>READING CLUE... (BUZZER OPENS IN <TimeLeft c={activeClue} />s)</span>
                 </div>
               )}
               {activeClue.phase === 'BUZZER_OPEN' && (
                 <div className="flex items-center gap-2 px-4 py-1 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-xs font-black animate-bounce">
                   <div className="w-3 h-3 rounded-full bg-amber-400" />
-                  <span>BUZZERS ACTIVE! ({activeClue.timer.toFixed(1)}s)</span>
+                  <span>BUZZERS ACTIVE! (<TimeLeft c={activeClue} />s)</span>
                 </div>
               )}
               {activeClue.phase === 'ANSWERING' && (!activeClue.isBonusWager || activeClue.bonusWagerLocked) && (
                 <div className="flex items-center gap-2 px-4 py-1 rounded-full bg-blue-900 border border-blue-500 text-blue-200 text-xs font-bold">
                   <Clock className="w-3.5 h-3.5 text-amber-400" />
-                  <span>ANSWER TIMER: {activeClue.timer.toFixed(1)}s</span>
+                  <span>ANSWER TIMER: <TimeLeft c={activeClue} />s</span>
                 </div>
               )}
             </div>
@@ -3240,7 +3020,7 @@ export default function App() {
 
                 <div className="text-[11px] sm:text-xs text-slate-300">
                   Current Bankroll: <strong className="text-amber-400">${contestants[activeClue.bonusSelectingPlayerId]?.score.toLocaleString()}</strong> | Min: $5 | Max: $
-                  {Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[activeClue.bonusSelectingPlayerId]?.score).toLocaleString()}
+                  {maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score).toLocaleString()}
                 </div>
 
                 {activeClue.bonusSelectingPlayerId === 'player' || (!isClientConnected && activeClue.bonusSelectingPlayerId === 'player2') ? (
@@ -3251,12 +3031,12 @@ export default function App() {
                       <input
                         type="number"
                         min={5}
-                        max={Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[activeClue.bonusSelectingPlayerId]?.score)}
+                        max={maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score)}
                         step={50}
                         value={activeClue.bonusWagerInput}
                         onChange={(e) => {
                           const val = parseInt(e.target.value) || 5;
-                          const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[activeClue.bonusSelectingPlayerId]?.score);
+                          const maxVal = maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score);
                           setActiveClue((prev) => (prev ? {...prev, bonusWagerInput: Math.max(5, Math.min(maxVal, val))} : null));
                         }}
                         className="w-24 sm:w-32 bg-transparent text-amber-300 font-black text-center text-base sm:text-lg focus:outline-none"
@@ -3265,7 +3045,7 @@ export default function App() {
 
                     <button
                       onClick={() => {
-                        const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[activeClue.bonusSelectingPlayerId]?.score);
+                        const maxVal = maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score);
                         setActiveClue((prev) => (prev ? {...prev, bonusWagerInput: maxVal} : null));
                       }}
                       className="px-3 py-1.5 bg-blue-950 hover:bg-blue-800 text-blue-200 border border-blue-700 rounded-md text-xs font-bold transition-all active:scale-95">
@@ -3274,7 +3054,7 @@ export default function App() {
 
                     <button
                       onClick={() => {
-                        const maxVal = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[activeClue.bonusSelectingPlayerId]?.score);
+                        const maxVal = maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score);
                         setActiveClue((prev) => (prev ? {...prev, bonusWagerInput: Math.max(50, Math.floor(maxVal / 2))} : null));
                       }}
                       className="px-3 py-1.5 bg-blue-950 hover:bg-blue-800 text-blue-200 border border-blue-700 rounded-md text-xs font-bold transition-all active:scale-95">
@@ -3297,9 +3077,8 @@ export default function App() {
                           prev
                             ? {
                                 ...prev,
+                                ...startCountdown(TIMES.dailyDouble, Date.now()),
                                 bonusWagerLocked: true,
-                                timer: 12.0,
-                                maxTimer: 12.0,
                                 feedbackText: `Wager locked at $${prev.bonusWagerInput.toLocaleString()}! Provide your answer.`,
                               }
                             : null

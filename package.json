@@ -4,13 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules",
     "dev": "vite",
     "build": "vite build",
     "questions": "tsx scripts/build-nfl-questions.ts",
     "simulate": "tsx tests/repeat-simulation.ts",
     "test:voice": "tsx tests/spoken-answers.ts",
-    "test:typed": "tsx tests/typed-answers.ts"
+    "test:typed": "tsx tests/typed-answers.ts",
+    "test:rules": "tsx tests/rules.ts",
+    "test:game": "node tests/full-game.mjs"
   },
   "keywords": [],
   "author": "",
