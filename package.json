@@ -9,7 +9,8 @@
     "build": "vite build",
     "questions": "tsx scripts/build-nfl-questions.ts",
     "simulate": "tsx tests/repeat-simulation.ts",
-    "test:voice": "tsx tests/spoken-answers.ts"
+    "test:voice": "tsx tests/spoken-answers.ts",
+    "test:typed": "tsx tests/typed-answers.ts"
   },
   "keywords": [],
   "author": "",
