@@ -50,6 +50,11 @@ Final Showdown it fills in the answer box for you to check. Voice uses the brows
 speech recognition, which works in Chrome (Android, desktop) and Safari (iPhone).
 The button hides itself on browsers without it. `npm run test:voice` checks the matching.
 
+For a voice-only game, pick **Mic Only** as the answer format. No options are shown:
+the mic starts listening as soon as you buzz in, and whatever you say is checked like
+a typed answer (nicknames and small mistakes are fine). If nothing is heard, tap the
+mic to try again before the 10-second timer runs out.
+
 ## Publishing
 
 The **Publish game** GitHub Action builds the game and puts it on GitHub Pages on

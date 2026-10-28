@@ -7,7 +7,7 @@ export type OpponentMode =
   | 'ONLINE_DUEL';
 
 export type TriviaTier = 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT';
-export type AnswerFormat = 'STANDARD' | 'HARD' | 'EXPERT';
+export type AnswerFormat = 'STANDARD' | 'HARD' | 'EXPERT' | 'VOICE';
 
 export interface LeaderboardEntry {
   id: string;
@@ -40,6 +40,7 @@ export const FORMAT_OPTIONS: { id: AnswerFormat; label: string; shortLabel: stri
   { id: 'STANDARD', label: '4-Choice (Multiple Choice)', shortLabel: '4-Choice' },
   { id: 'HARD', label: '8-Choice (Multiple Choice)', shortLabel: '8-Choice' },
   { id: 'EXPERT', label: 'Text Input (Direct Typing)', shortLabel: 'Type-In' },
+  { id: 'VOICE', label: 'Mic Only (Say Your Answer)', shortLabel: 'Mic Only' },
 ];
 
 const SEED_BENCHMARK_NAMES = [
