@@ -8,6 +8,8 @@ export type OpponentMode =
 
 export type TriviaTier = 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT';
 export type AnswerFormat = 'STANDARD' | 'HARD' | 'EXPERT' | 'VOICE';
+// Short games have a smaller board, so their scores are kept on separate leaderboards.
+export type GameLength = 'FULL' | 'SHORT';
 
 export interface LeaderboardEntry {
   id: string;
@@ -43,12 +45,19 @@ export const FORMAT_OPTIONS: { id: AnswerFormat; label: string; shortLabel: stri
   { id: 'VOICE', label: 'Mic Only (Say Your Answer)', shortLabel: 'Mic Only' },
 ];
 
+export const LENGTH_OPTIONS: { id: GameLength; label: string }[] = [
+  { id: 'FULL', label: 'Full Game' },
+  { id: 'SHORT', label: 'Short Game' },
+];
+
 export function getStorageKey(
   opponent: OpponentMode,
   tier: TriviaTier,
-  format: AnswerFormat
+  format: AnswerFormat,
+  length: GameLength = 'FULL'
 ): string {
-  return `sport_trivia_leaderboards_${opponent}_${tier}_${format}`;
+  const suffix = length === 'SHORT' ? '_SHORT' : '';
+  return `sport_trivia_leaderboards_${opponent}_${tier}_${format}${suffix}`;
 }
 
 export function getLastPlayerName(): string {
@@ -69,11 +78,12 @@ export function setLastPlayerName(name: string): void {
 export function getLeaderboard(
   opponent: OpponentMode,
   tier: TriviaTier,
-  format: AnswerFormat
+  format: AnswerFormat,
+  length: GameLength = 'FULL'
 ): LeaderboardEntry[] {
   if (typeof window === 'undefined') return [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(getStorageKey(opponent, tier, format)) || '[]');
+    const parsed = JSON.parse(localStorage.getItem(getStorageKey(opponent, tier, format, length)) || '[]');
     if (!Array.isArray(parsed)) return [];
     return (parsed as LeaderboardEntry[])
       .filter((e) => !e.id.startsWith('seed_'))
@@ -98,9 +108,10 @@ export function recordLeaderboardEntry(
     accuracy: number;
     questionsAnswered: number;
     dailyDoublesWon: number;
-  }
+  },
+  length: GameLength = 'FULL'
 ): { rank: number; isTop10: boolean; isHighScore: boolean } {
-  const current = getLeaderboard(opponent, tier, format);
+  const current = getLeaderboard(opponent, tier, format, length);
   const dateFormatted = new Date().toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -124,7 +135,7 @@ export function recordLeaderboardEntry(
 
   const top10 = updated.slice(0, 10);
   if (typeof window !== 'undefined') {
-    const key = getStorageKey(opponent, tier, format);
+    const key = getStorageKey(opponent, tier, format, length);
     try {
       localStorage.setItem(key, JSON.stringify(top10));
       setLastPlayerName(entryData.playerName);
@@ -142,11 +153,12 @@ export function recordLeaderboardEntry(
 export function resetLeaderboardCategory(
   opponent: OpponentMode,
   tier: TriviaTier,
-  format: AnswerFormat
+  format: AnswerFormat,
+  length: GameLength = 'FULL'
 ): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem(getStorageKey(opponent, tier, format));
+    localStorage.removeItem(getStorageKey(opponent, tier, format, length));
   } catch (e) {}
 }
 
@@ -158,7 +170,7 @@ export function resetAllLeaderboards(): void {
   OPPONENT_OPTIONS.forEach((opp) => {
     TIER_OPTIONS.forEach((t) => {
       FORMAT_OPTIONS.forEach((f) => {
-        resetLeaderboardCategory(opp.id, t.id, f.id);
+        LENGTH_OPTIONS.forEach((l) => resetLeaderboardCategory(opp.id, t.id, f.id, l.id));
       });
     });
   });

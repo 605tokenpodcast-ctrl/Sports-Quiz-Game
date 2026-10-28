@@ -7,6 +7,8 @@
 
 export * from './triviaEngine';
 import {
+  BOARD_LAYOUTS,
+  GameLength,
   generateBoardForRound,
   generateSmartDistractors,
   getChampionshipFinalClues,
@@ -66,7 +68,8 @@ export function getCategoriesForRound(
   categoryCount = 6,
   usedCategoryIds: Set<string>,
   usedQuestionIds: Set<string>,
-  usedAnswers: Set<string>
+  usedAnswers: Set<string>,
+  gameLength: GameLength = 'FULL'
 ): TriviaCategory[] {
   return generateBoardForRound(
     round,
@@ -74,7 +77,8 @@ export function getCategoriesForRound(
     categoryCount,
     usedCategoryIds,
     usedQuestionIds,
-    usedAnswers
+    usedAnswers,
+    gameLength
   );
 }
 
@@ -126,14 +130,14 @@ export function getFreshFinalShowdownClue(
 }
 
 /**
- * Creates a complete full-game session with strict 100% deduplication:
- * - 6 distinct categories for Round 1 (30 unique questions, 30 unique answers)
- * - 6 different distinct categories for Round 2 (30 unique questions, 30 unique answers)
- * - 1 unique Final Showdown question (1 unique answer)
- * - Total = 61 completely unique questions across 12 distinct categories with ZERO repeated answers!
+ * Creates a complete game session with strict 100% deduplication:
+ * - Full game: 6 categories x 5 clues per round (61 questions with the Final Showdown)
+ * - Short game: 5 categories x 3 clues per round (31 questions with the Final Showdown)
+ * - Round 2 categories never repeat Round 1's, and no answer repeats anywhere in the game.
  */
 export function createFullGameSession(
-  difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT' = 'MEDIUM'
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT' = 'MEDIUM',
+  gameLength: GameLength = 'FULL'
 ): {
   round1Board: TriviaCategory[];
   round2Board: TriviaCategory[];
@@ -147,24 +151,28 @@ export function createFullGameSession(
   const usedQuestionIds = new Set<string>();
   const usedAnswers = new Set<string>();
 
-  // Round 1 (6 categories x 5 ladder tiles = 30 unique questions & answers)
+  const categoryCount = BOARD_LAYOUTS[gameLength].categories;
+
+  // Round 1
   const round1Board = getCategoriesForRound(
     'ROUND_1',
     difficulty,
-    6,
+    categoryCount,
     usedCategoryIds,
     usedQuestionIds,
-    usedAnswers
+    usedAnswers,
+    gameLength
   );
 
-  // Round 2 (6 DIFFERENT categories x 5 ladder tiles = 30 unique questions & answers)
+  // Round 2 (DIFFERENT categories from Round 1)
   const round2Board = getCategoriesForRound(
     'ROUND_2',
     difficulty,
-    6,
+    categoryCount,
     usedCategoryIds,
     usedQuestionIds,
-    usedAnswers
+    usedAnswers,
+    gameLength
   );
 
   // Final Showdown Clue (1 unique question with unique answer)

@@ -111,9 +111,11 @@ import VoiceAnswerButton, {isVoiceSupported} from './utils/VoiceAnswerButton';
 import {
   AnswerFormat,
   FORMAT_OPTIONS,
+  GameLength,
   getLeaderboard,
   getLastPlayerName,
   LeaderboardEntry,
+  LENGTH_OPTIONS,
   OPPONENT_OPTIONS,
   OpponentMode,
   recordLeaderboardEntry,
@@ -284,6 +286,7 @@ export default function App() {
   const [leaderboardFilterOpponent, setLeaderboardFilterOpponent] = useState<OpponentMode>('PRO_AI');
   const [leaderboardFilterTier, setLeaderboardFilterTier] = useState<TriviaTier>('MEDIUM');
   const [leaderboardFilterFormat, setLeaderboardFilterFormat] = useState<AnswerFormat>('STANDARD');
+  const [leaderboardFilterLength, setLeaderboardFilterLength] = useState<GameLength>('FULL');
   const [leaderboardRefreshCounter, setLeaderboardRefreshCounter] = useState(0);
   const [highScoreCelebration, setHighScoreCelebration] = useState<{
     rank: number;
@@ -292,11 +295,14 @@ export default function App() {
     opponent: OpponentMode;
     tier: TriviaTier;
     format: AnswerFormat;
+    length: GameLength;
   } | null>(null);
 
   // Game setup options
   const [difficulty, setDifficulty] = useState<AIDifficulty>('MEDIUM');
   const [answerMode, setAnswerMode] = useState<AnswerMode>('STANDARD');
+  // Full: 6 categories x 5 clues per round. Short: 5 categories x 3 clues per round.
+  const [gameLength, setGameLength] = useState<GameLength>('FULL');
   const [isTwoPlayerMode, setIsTwoPlayerMode] = useState(false);
 
   // Core Game State
@@ -310,6 +316,22 @@ export default function App() {
   const [round1Board, setRound1Board] = useState<TriviaCategory[]>([]);
   const [round2Board, setRound2Board] = useState<TriviaCategory[]>([]);
   const [answeredClueIds, setAnsweredClueIds] = useState<Set<string>>(new Set());
+  // Top tile value on the board in play caps the smallest Daily Double wager.
+  // Read from the board itself so joined phones get it without extra syncing.
+  const roundMaxClue = useMemo(() => {
+    const board = currentRound === 'ROUND_1' ? round1Board : round2Board;
+    const values = board.flatMap((cat) => cat.clues.map((c) => c.value));
+    return values.length ? Math.max(...values) : currentRound === 'ROUND_1' ? 1000 : 2000;
+  }, [currentRound, round1Board, round2Board]);
+
+  // Board grid shape: 6 x 5 for a full game, 5 x 3 for a short one.
+  const boardColsClass =
+    (currentRound === 'ROUND_1' ? round1Board : round2Board).length === 5 ? 'grid-cols-5' : 'grid-cols-6';
+  const boardRowIndexes = useMemo(() => {
+    const board = currentRound === 'ROUND_1' ? round1Board : round2Board;
+    const rows = Math.max(0, ...board.map((cat) => cat.clues.length));
+    return Array.from({length: rows}, (_, i) => i);
+  }, [currentRound, round1Board, round2Board]);
 
   // NFL question bank, built weekly from nflverse data
   const [bankInfo, setBankInfo] = useState<ExternalBankInfo | null>(null);
@@ -558,33 +580,38 @@ export default function App() {
     return code;
   }, [showToast]);
 
-  // Setup Board data with strict session-wide deduplication & Daily Doubles (1 in Round 1, 2 in Round 2, 6x5 symmetry)
+  // Setup Board data with strict session-wide deduplication & Daily Doubles
+  // (1 in Round 1, 2 in Round 2; a short game has half the clues, so just 1 in Round 2)
   const initializeBoards = useCallback(() => {
-    const session = createFullGameSession(difficulty);
+    const session = createFullGameSession(difficulty, gameLength);
     const r1 = session.round1Board;
     const r2 = session.round2Board;
+    const r1Rows = r1[0]?.clues.length || 5;
+    const r2Rows = r2[0]?.clues.length || 5;
 
     // 1 Daily Double hidden in Round 1
     const r1Cat = Math.floor(Math.random() * r1.length);
-    const r1Clue = Math.floor(Math.random() * 5);
+    const r1Clue = Math.floor(Math.random() * r1Rows);
     if (r1[r1Cat]?.clues[r1Clue]) {
       r1[r1Cat].clues[r1Clue].isBonusWager = true;
     }
 
-    // 2 distinct Daily Doubles hidden in Round 2
+    // Daily Doubles hidden in Round 2, in different categories
     const bonus1Cat = Math.floor(Math.random() * r2.length);
-    const bonus1Clue = Math.floor(Math.random() * 5);
+    const bonus1Clue = Math.floor(Math.random() * r2Rows);
     if (r2[bonus1Cat]?.clues[bonus1Clue]) {
       r2[bonus1Cat].clues[bonus1Clue].isBonusWager = true;
     }
 
-    let bonus2Cat = Math.floor(Math.random() * r2.length);
-    let bonus2Clue = Math.floor(Math.random() * 5);
-    if (bonus2Cat === bonus1Cat && bonus2Clue === bonus1Clue) {
-      bonus2Cat = (bonus1Cat + 2) % r2.length;
-    }
-    if (r2[bonus2Cat]?.clues[bonus2Clue]) {
-      r2[bonus2Cat].clues[bonus2Clue].isBonusWager = true;
+    if (gameLength === 'FULL') {
+      let bonus2Cat = Math.floor(Math.random() * r2.length);
+      let bonus2Clue = Math.floor(Math.random() * r2Rows);
+      if (bonus2Cat === bonus1Cat && bonus2Clue === bonus1Clue) {
+        bonus2Cat = (bonus1Cat + 2) % r2.length;
+      }
+      if (r2[bonus2Cat]?.clues[bonus2Clue]) {
+        r2[bonus2Cat].clues[bonus2Clue].isBonusWager = true;
+      }
     }
 
     // Development only: ?board=2x2 plays a tiny board (2 categories of 2 clues) for quick tests.
@@ -607,7 +634,7 @@ export default function App() {
     // Set Final Clue from deduplicated session
     setFinalClue(session.finalClue);
     setSeenCountRefresh((c) => c + 1);
-  }, [difficulty]);
+  }, [difficulty, gameLength]);
 
   // AI reflex and accuracy configuration
   const aiConfig = useMemo(() => aiSettings(difficulty), [difficulty]);
@@ -664,7 +691,7 @@ export default function App() {
       const options = generateOptions(clue, answerMode);
 
       const pickerScore = contestants[pickerId]?.score || 0;
-      const aiWager = aiDailyDoubleWager(pickerId === 'coach' ? aiConfig.coachAcc : aiConfig.analystAcc, currentRound, pickerScore);
+      const aiWager = aiDailyDoubleWager(pickerId === 'coach' ? aiConfig.coachAcc : aiConfig.analystAcc, roundMaxClue, pickerScore);
 
       if (isBonus) {
         gameAudio.playPowerupChime();
@@ -684,7 +711,7 @@ export default function App() {
         bonusSelectingPlayerId: pickerId,
         bonusWagerInput: isBonus
           ? isHumanSeat(pickerId)
-            ? defaultDailyDoubleWager(currentRound, pickerScore)
+            ? defaultDailyDoubleWager(roundMaxClue, pickerScore)
             : aiWager
           : clue.value,
         bonusWagerLocked: false, // Daily Double starts UNLOCKED so clue text is completely obscured/hidden!
@@ -706,7 +733,7 @@ export default function App() {
         player2: {...prev.player2, reaction: isBonus && pickerId === 'player2' ? 'answering' : 'idle'},
       }));
     },
-    [activeClue, currentRound, round1Board, round2Board, answeredClueIds, activeSelector, contestants, answerMode, aiConfig, player3Human]
+    [activeClue, currentRound, round1Board, round2Board, roundMaxClue, answeredClueIds, activeSelector, contestants, answerMode, aiConfig, player3Human]
   );
 
   // Automatic AI Wager Announcement & Reveal for Daily Doubles
@@ -1049,7 +1076,7 @@ export default function App() {
           {
             const prev = activeClueRef.current;
             if (!prev || !prev.isBonusWager || prev.bonusSelectingPlayerId !== seat || prev.bonusWagerLocked) break;
-            const wager = clampDailyDoubleWager(msg.wager, currentRound, contestants[seat]?.score || 0);
+            const wager = clampDailyDoubleWager(msg.wager, roundMaxClue, contestants[seat]?.score || 0);
             if (!msg.lockIn) {
               commitClue({...prev, bonusWagerInput: wager});
               break;
@@ -1119,7 +1146,7 @@ export default function App() {
         }
       }
     },
-    [deviceRole, handleContestantBuzz, handleContestantSubmitAnswer, activeSelector, selectClue, showToast, contestants, currentRound, finalShowdownPhase, finalLocks]
+    [deviceRole, handleContestantBuzz, handleContestantSubmitAnswer, activeSelector, selectClue, showToast, contestants, currentRound, roundMaxClue, finalShowdownPhase, finalLocks]
   );
 
   // The connection lives as long as the room. It reads the latest handler through a ref
@@ -1625,21 +1652,27 @@ export default function App() {
       for (const id of humans) {
         const c = contestants[id];
         const attempts = c.correctCount + c.wrongCount;
-        const result = recordLeaderboardEntry(opp, tier, format, {
-          playerName: id === 'player' ? playerName || 'Champion' : c.name,
-          score: finalScores[id],
-          accuracy: attempts > 0 ? (c.correctCount / attempts) * 100 : 100,
-          questionsAnswered: attempts,
-          dailyDoublesWon: c.bonusHits || 0,
-        });
+        const result = recordLeaderboardEntry(
+          opp,
+          tier,
+          format,
+          {
+            playerName: id === 'player' ? playerName || 'Champion' : c.name,
+            score: finalScores[id],
+            accuracy: attempts > 0 ? (c.correctCount / attempts) * 100 : 100,
+            questionsAnswered: attempts,
+            dailyDoublesWon: c.bonusHits || 0,
+          },
+          gameLength
+        );
         if (id === 'player' && result.isTop10) {
-          setHighScoreCelebration({rank: result.rank, isHighScore: result.isHighScore, score: finalScores[id], opponent: opp, tier, format});
+          setHighScoreCelebration({rank: result.rank, isHighScore: result.isHighScore, score: finalScores[id], opponent: opp, tier, format, length: gameLength});
           if (result.isHighScore) gameAudio.playVictoryFanfare();
         }
       }
       setLeaderboardRefreshCounter((c) => c + 1);
     },
-    [currentOpponentMode, difficulty, answerMode, playerName, contestants, isTwoPlayerMode, isClientConnected, player3Human]
+    [currentOpponentMode, difficulty, answerMode, gameLength, playerName, contestants, isTwoPlayerMode, isClientConnected, player3Human]
   );
 
   // Final Showdown Resolution (Host)
@@ -1803,9 +1836,10 @@ export default function App() {
     return getLeaderboard(
       leaderboardFilterOpponent,
       leaderboardFilterTier,
-      leaderboardFilterFormat
+      leaderboardFilterFormat,
+      leaderboardFilterLength
     );
-  }, [leaderboardFilterOpponent, leaderboardFilterTier, leaderboardFilterFormat, leaderboardRefreshCounter]);
+  }, [leaderboardFilterOpponent, leaderboardFilterTier, leaderboardFilterFormat, leaderboardFilterLength, leaderboardRefreshCounter]);
 
   // Player's personal best in currently selected category
   const myBestRecord = useMemo(() => {
@@ -1979,7 +2013,7 @@ export default function App() {
 
               {/* C. Daily Double Wager for this phone's player. Typed here, sent to the host on confirm. */}
               {isDailyDoubleForMe && !activeClue.bonusWagerLocked && (() => {
-                const maxVal = maxDailyDoubleWager(currentRound, contestants[mySeat].score);
+                const maxVal = maxDailyDoubleWager(roundMaxClue, contestants[mySeat].score);
                 const wager = Math.max(5, Math.min(maxVal, parseInt(clientWager) || 5));
                 return (
                 <div className="w-full bg-slate-900 border-2 border-amber-400 rounded-2xl p-4 flex flex-col items-center gap-3">
@@ -2124,7 +2158,7 @@ export default function App() {
                   </div>
 
                   {/* Compact Mobile Selection Grid */}
-                  <div className="grid grid-cols-6 gap-1">
+                  <div className={`grid ${boardColsClass} gap-1`}>
                     {board.map((cat, cIdx) => (
                       <div key={cat.title} className="flex flex-col gap-1">
                         <div className="text-[8px] font-bold text-amber-300 truncate text-center p-1 bg-blue-950 rounded border border-blue-800" title={cat.title}>
@@ -2496,7 +2530,7 @@ export default function App() {
         {/* UPPER ARENA: Trivia Board or Final Showdown View */}
         <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center">
           {currentRound !== 'FINAL_SHOWDOWN' ? (
-            /* TRIVIA BOARD (6 Categories x 5 Clues) */
+            /* TRIVIA BOARD (6 Categories x 5 Clues, or 5 x 3 in a short game) */
             <div className="w-full max-w-6xl h-full flex flex-col justify-center gap-1 sm:gap-2">
               {/* Turn Banner / AI Picking Status */}
               <div className="w-full flex items-center justify-between px-2 py-0.5 bg-slate-900/80 border border-blue-800/60 rounded-md text-[10px] sm:text-xs font-bold">
@@ -2529,7 +2563,7 @@ export default function App() {
               </div>
 
               {/* Category Headers */}
-              <div className="grid grid-cols-6 gap-1 sm:gap-1.5 text-center">
+              <div className={`grid ${boardColsClass} gap-1 sm:gap-1.5 text-center`}>
                 {(currentRound === 'ROUND_1' ? round1Board : round2Board).map((cat) => (
                   <div
                     key={cat.title}
@@ -2541,9 +2575,9 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Clue Dollar Tiles Grid (6 columns x 5 rows) */}
-              <div className="grid grid-cols-6 gap-1 sm:gap-1.5 flex-1 min-h-0">
-                {[0, 1, 2, 3, 4].map((rowIdx) =>
+              {/* Clue Dollar Tiles Grid (one column per category, one row per clue value) */}
+              <div className={`grid ${boardColsClass} gap-1 sm:gap-1.5 flex-1 min-h-0`}>
+                {boardRowIndexes.map((rowIdx) =>
                   (currentRound === 'ROUND_1' ? round1Board : round2Board).map((cat, catIdx) => {
                     const clue = cat.clues[rowIdx];
                     if (!clue) return null;
@@ -3020,7 +3054,7 @@ export default function App() {
 
                 <div className="text-[11px] sm:text-xs text-slate-300">
                   Current Bankroll: <strong className="text-amber-400">${contestants[activeClue.bonusSelectingPlayerId]?.score.toLocaleString()}</strong> | Min: $5 | Max: $
-                  {maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score).toLocaleString()}
+                  {maxDailyDoubleWager(roundMaxClue, contestants[activeClue.bonusSelectingPlayerId]?.score).toLocaleString()}
                 </div>
 
                 {activeClue.bonusSelectingPlayerId === 'player' || (!isClientConnected && activeClue.bonusSelectingPlayerId === 'player2') ? (
@@ -3031,12 +3065,12 @@ export default function App() {
                       <input
                         type="number"
                         min={5}
-                        max={maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score)}
+                        max={maxDailyDoubleWager(roundMaxClue, contestants[activeClue.bonusSelectingPlayerId]?.score)}
                         step={50}
                         value={activeClue.bonusWagerInput}
                         onChange={(e) => {
                           const val = parseInt(e.target.value) || 5;
-                          const maxVal = maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score);
+                          const maxVal = maxDailyDoubleWager(roundMaxClue, contestants[activeClue.bonusSelectingPlayerId]?.score);
                           setActiveClue((prev) => (prev ? {...prev, bonusWagerInput: Math.max(5, Math.min(maxVal, val))} : null));
                         }}
                         className="w-24 sm:w-32 bg-transparent text-amber-300 font-black text-center text-base sm:text-lg focus:outline-none"
@@ -3045,7 +3079,7 @@ export default function App() {
 
                     <button
                       onClick={() => {
-                        const maxVal = maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score);
+                        const maxVal = maxDailyDoubleWager(roundMaxClue, contestants[activeClue.bonusSelectingPlayerId]?.score);
                         setActiveClue((prev) => (prev ? {...prev, bonusWagerInput: maxVal} : null));
                       }}
                       className="px-3 py-1.5 bg-blue-950 hover:bg-blue-800 text-blue-200 border border-blue-700 rounded-md text-xs font-bold transition-all active:scale-95">
@@ -3054,7 +3088,7 @@ export default function App() {
 
                     <button
                       onClick={() => {
-                        const maxVal = maxDailyDoubleWager(currentRound, contestants[activeClue.bonusSelectingPlayerId]?.score);
+                        const maxVal = maxDailyDoubleWager(roundMaxClue, contestants[activeClue.bonusSelectingPlayerId]?.score);
                         setActiveClue((prev) => (prev ? {...prev, bonusWagerInput: Math.max(50, Math.floor(maxVal / 2))} : null));
                       }}
                       className="px-3 py-1.5 bg-blue-950 hover:bg-blue-800 text-blue-200 border border-blue-700 rounded-md text-xs font-bold transition-all active:scale-95">
@@ -3063,11 +3097,10 @@ export default function App() {
 
                     <button
                       onClick={() => {
-                        const roundMax = currentRound === 'ROUND_1' ? 1000 : 2000;
-                        setActiveClue((prev) => (prev ? {...prev, bonusWagerInput: roundMax} : null));
+                        setActiveClue((prev) => (prev ? {...prev, bonusWagerInput: roundMaxClue} : null));
                       }}
                       className="px-3 py-1.5 bg-blue-950 hover:bg-blue-800 text-blue-200 border border-blue-700 rounded-md text-xs font-bold transition-all active:scale-95">
-                      ${currentRound === 'ROUND_1' ? '1,000' : '2,000'}
+                      ${roundMaxClue.toLocaleString()}
                     </button>
 
                     <button
@@ -3459,6 +3492,30 @@ export default function App() {
               </div>
             </div>
 
+            {/* FILTER BAR 4: GAME LENGTH TABS */}
+            <div className="mb-3">
+              <label className="text-[10px] font-bold text-amber-300 uppercase tracking-wider block mb-1">
+                4. Game Length
+              </label>
+              <div className="grid grid-cols-2 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                {LENGTH_OPTIONS.map((l) => (
+                  <button
+                    key={l.id}
+                    onClick={() => {
+                      gameAudio.playCrispClick();
+                      setLeaderboardFilterLength(l.id);
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                      leaderboardFilterLength === l.id
+                        ? 'bg-amber-500 text-slate-950 font-black shadow'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                    }`}>
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* LEADERBOARD TABLE */}
             <div className="bg-slate-950 rounded-xl border border-blue-900/60 overflow-hidden mb-3">
               <div className="grid grid-cols-12 bg-slate-900/90 px-3 py-2 text-[10px] font-black text-amber-400 uppercase tracking-wider border-b border-slate-800">
@@ -3546,7 +3603,8 @@ export default function App() {
                     resetLeaderboardCategory(
                       leaderboardFilterOpponent,
                       leaderboardFilterTier,
-                      leaderboardFilterFormat
+                      leaderboardFilterFormat,
+                      leaderboardFilterLength
                     );
                     setLeaderboardRefreshCounter((c) => c + 1);
                     showToast('Cleared this leaderboard');
@@ -3572,6 +3630,7 @@ export default function App() {
                   // Apply currently selected tier and format to match options
                   setDifficulty(leaderboardFilterTier as AIDifficulty);
                   setAnswerMode(leaderboardFilterFormat as AnswerMode);
+                  setGameLength(leaderboardFilterLength);
                   if (leaderboardFilterOpponent === 'PASS_PLAY') {
                     setIsTwoPlayerMode(true);
                     setIsClientConnected(false);
@@ -3705,6 +3764,36 @@ export default function App() {
                         : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-blue-500'
                     }`}>
                     {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Game Length Selector */}
+            <div className="w-full mb-3 text-left">
+              <label className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-1">
+                Game Length
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(
+                  [
+                    {id: 'FULL', label: 'Full Game', desc: '6 Categories x 5 Clues'},
+                    {id: 'SHORT', label: 'Short Game', desc: '5 Categories x 3 Clues'},
+                  ] as const
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      gameAudio.playCrispClick();
+                      setGameLength(m.id);
+                    }}
+                    className={`min-w-[44px] min-h-[44px] py-1.5 px-1 rounded-lg border flex flex-col items-center justify-center transition-all ${
+                      gameLength === m.id
+                        ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md scale-[1.02]'
+                        : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-blue-500'
+                    }`}>
+                    <span className="text-xs font-bold">{m.label}</span>
+                    <span className="text-[8px] opacity-80">{m.desc}</span>
                   </button>
                 ))}
               </div>
@@ -4152,7 +4241,7 @@ export default function App() {
               <div>
                 <strong className="text-amber-300">3. Daily Double Hidden Wagers:</strong>
                 <p className="mt-0.5 text-slate-400">
-                  Round 1 features <strong>1 Daily Double</strong>; Round 2 features <strong>2 Daily Doubles</strong>. When picked, the clue is <strong>hidden and classified</strong> until the contestant confirms their strategic cash wager!
+                  Round 1 features <strong>1 Daily Double</strong>; Round 2 features <strong>2 Daily Doubles</strong> (just 1 in a Short Game). When picked, the clue is <strong>hidden and classified</strong> until the contestant confirms their strategic cash wager!
                 </p>
               </div>
 
@@ -4202,7 +4291,8 @@ export default function App() {
                   </span>
                 </div>
                 <div className="text-[10px] text-slate-200 mt-0.5">
-                  Saved to <strong>{highScoreCelebration.opponent}</strong> ({highScoreCelebration.tier} / {highScoreCelebration.format})
+                  Saved to <strong>{highScoreCelebration.opponent}</strong> ({highScoreCelebration.tier} / {highScoreCelebration.format}
+                  {highScoreCelebration.length === 'SHORT' ? ' / Short Game' : ''})
                 </div>
               </div>
             )}

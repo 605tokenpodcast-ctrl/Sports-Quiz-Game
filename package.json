@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules",
+    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules && npm run -s test:length",
     "dev": "vite",
     "build": "vite build",
     "questions": "tsx scripts/build-nfl-questions.ts",
@@ -12,7 +12,8 @@
     "test:voice": "tsx tests/spoken-answers.ts",
     "test:typed": "tsx tests/typed-answers.ts",
     "test:rules": "tsx tests/rules.ts",
-    "test:game": "node tests/full-game.mjs"
+    "test:game": "node tests/full-game.mjs",
+    "test:length": "tsx tests/game-length.ts"
   },
   "keywords": [],
   "author": "",

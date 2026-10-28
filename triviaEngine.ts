@@ -400,6 +400,31 @@ export function createDeterministicHash(str: string): string {
 }
 
 // ===========================================================================
+// GAME LENGTH
+// Full: 6 categories x 5 clues per round. Short: 5 categories x 3 clues per round.
+// Short tiles are worth more so a short game's board adds up to about as much
+// as a full game's (15,000 vs 18,000 in Round 1, 30,000 vs 36,000 in Round 2).
+// ===========================================================================
+
+export type GameLength = 'FULL' | 'SHORT';
+
+export const BOARD_LAYOUTS: Record<
+  GameLength,
+  {categories: number; difficulties: number[]; values: Record<'ROUND_1' | 'ROUND_2', number[]>}
+> = {
+  FULL: {
+    categories: 6,
+    difficulties: [1, 2, 3, 4, 5],
+    values: {ROUND_1: [200, 400, 600, 800, 1000], ROUND_2: [400, 800, 1200, 1600, 2000]},
+  },
+  SHORT: {
+    categories: 5,
+    difficulties: [1, 3, 5],
+    values: {ROUND_1: [500, 1000, 1500], ROUND_2: [1000, 2000, 3000]},
+  },
+};
+
+// ===========================================================================
 // STRICT DEDUPLICATION BOARD GENERATOR
 // Ensures:
 // 1. usedCategoryIds: No category repeats in the same game session.
@@ -413,20 +438,22 @@ export function generateBoardForRound(
   categoryCount = 6,
   usedCategoryIds: Set<string>,
   usedQuestionIds: Set<string>,
-  usedAnswers: Set<string>
+  usedAnswers: Set<string>,
+  gameLength: GameLength = 'FULL'
 ): TriviaCategory[] {
   const allCategories = getActiveCategories();
   const seen = getSeenQuestionIds();
-  const isRound2 = round === 'ROUND_2';
-  const targetValues = isRound2 ? [400, 800, 1200, 1600, 2000] : [200, 400, 600, 800, 1000];
+  const layout = BOARD_LAYOUTS[gameLength];
+  const targetValues = layout.values[round];
+  const ladderSize = targetValues.length;
 
   // Pick categories whose ID has NOT been used in this match session,
   // favouring ones that still have plenty of questions this device hasn't seen.
   const availableCats = allCategories.filter((c) => !usedCategoryIds.has(c.id));
   const unseenCount = (c: TriviaCategory) => c.clues.filter((q) => !seen.has(q.id)).length;
   const shuffledAvailable = [
-    ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) >= 5)),
-    ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) < 5)),
+    ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) >= ladderSize)),
+    ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) < ladderSize)),
   ];
 
   const selectedBoard: TriviaCategory[] = [];
@@ -444,13 +471,13 @@ export function generateBoardForRound(
       ...eligibleShuffled.filter((q) => seen.has(q.id)),
     ];
 
-    // Ensure we can construct a full 5-clue ladder (difficulty 1 to 5)
+    // Ensure we can construct a full ladder (difficulty 1 to 5, or 1/3/5 for a short game)
     const ladderClues: QuestionClue[] = [];
     const localUsedClueIds = new Set<string>();
     const localUsedAnswers = new Set<string>();
 
-    for (let ladderIdx = 0; ladderIdx < 5; ladderIdx++) {
-      const targetDiff = ladderIdx + 1; // 1, 2, 3, 4, 5
+    for (let ladderIdx = 0; ladderIdx < ladderSize; ladderIdx++) {
+      const targetDiff = layout.difficulties[ladderIdx];
       const val = targetValues[ladderIdx];
 
       // Prefer an unseen exact difficulty match, then an unseen clue one level off,
@@ -495,8 +522,8 @@ export function generateBoardForRound(
       }
     }
 
-    if (ladderClues.length === 5) {
-      // Commit all 5 clues and the category to session tracking
+    if (ladderClues.length === ladderSize) {
+      // Commit all clues and the category to session tracking
       ladderClues.forEach((c) => {
         usedQuestionIds.add(c.id);
         usedAnswers.add(normalizeAnswer(c.correctAnswer));
