@@ -3,6 +3,8 @@
 An NFL trivia game show for phones. Up to 3 people can play on their own phones, or
 one person can play against two AI opponents (Coach Dave and Stats Riley).
 
+**Play it:** https://605tokenpodcast-ctrl.github.io/Sports-Quiz-Game/
+
 ## Running it
 
 ```sh
@@ -47,6 +49,12 @@ If it isn't sure, it shows what it heard and you tap instead. In expert mode and
 Final Showdown it fills in the answer box for you to check. Voice uses the browser's
 speech recognition, which works in Chrome (Android, desktop) and Safari (iPhone).
 The button hides itself on browsers without it. `npm run test:voice` checks the matching.
+
+## Publishing
+
+The **Publish game** GitHub Action builds the game and puts it on GitHub Pages on
+every push to `main` and after each weekly question refresh. One-time setup: in the
+repo's **Settings → Pages**, set **Source** to **GitHub Actions**.
 
 ## Settings
 
