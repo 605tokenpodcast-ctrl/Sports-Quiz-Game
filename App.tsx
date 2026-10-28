@@ -216,6 +216,41 @@ function QRCodeView({ value, size = 180 }: { value: string; size?: number }) {
   );
 }
 
+/** Final Showdown multiple choice: the same options for every player, the right answer always among them. */
+function FinalChoices({
+  options,
+  value,
+  onPick,
+  disabled = false,
+}: {
+  options: string[];
+  value: string;
+  onPick: (option: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className={`w-full grid gap-2 ${options.length > 4 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
+      {options.map((opt, idx) => (
+        <button
+          key={opt}
+          type="button"
+          disabled={disabled}
+          onClick={() => onPick(opt)}
+          className={`min-h-[44px] p-2 rounded-xl border-2 font-bold text-xs sm:text-sm text-left flex items-center gap-2 transition-all active:scale-95 disabled:opacity-60 ${
+            value === opt
+              ? 'bg-amber-400 text-slate-950 border-white'
+              : 'bg-blue-950 text-slate-100 border-blue-600 hover:border-amber-400'
+          }`}>
+          <span className="w-6 h-6 rounded-lg bg-slate-950/40 border border-amber-400/80 font-black text-xs flex items-center justify-center shrink-0">
+            {String.fromCharCode(65 + idx)}
+          </span>
+          <span className="line-clamp-2 flex-1">{opt}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const isMobile = useIsMobile();
   const {assets, isReady: assetsReady} = useAssets(ASSETS_MANIFEST);
@@ -385,6 +420,8 @@ export default function App() {
   const [finalPlayer2Input, setFinalPlayer2Input] = useState('');
   const [player3FinalWager, setPlayer3FinalWager] = useState(1000);
   const [finalPlayer3Input, setFinalPlayer3Input] = useState('');
+  // Multiple choice games get choices in the Final too (empty for typed and mic-only games).
+  const [finalOptions, setFinalOptions] = useState<string[]>([]);
 
   // Match statistics for post-game
   const [matchStats, setMatchStats] = useState({
@@ -617,6 +654,12 @@ export default function App() {
   // Final Showdown answers are typed, so voice fills the box and the player checks it before submitting.
   const finalAnswerByVoice = (heard: string[], setAnswer: (answer: string) => void): string | void => {
     if (!finalClue) return;
+    if (finalOptions.length) {
+      const match = matchSpokenOption(heard, finalOptions);
+      if (!match) return `Heard "${heard[0]}". Not sure which one you meant, so tap it.`;
+      setAnswer(match);
+      return;
+    }
     const answer = pickSpokenTypedAnswer(heard, finalClue, getConfig('fuzzyMatchThreshold') as number);
     if (!answer) return "Didn't catch that. Try again or type it.";
     setAnswer(answer);
@@ -804,6 +847,7 @@ export default function App() {
     setPlayer2FinalWager(1000);
     setFinalPlayer3Input('');
     setPlayer3FinalWager(1000);
+    setFinalOptions([]);
     setFinalLocks(NO_FINAL_LOCKS);
     awaySeatsRef.current = {};
     setAwaySeats({});
@@ -1169,6 +1213,7 @@ export default function App() {
           if (s.finalShowdownPhase) setFinalShowdownPhase(s.finalShowdownPhase);
           if (s.finalShowdownTimer !== undefined) setFinalShowdownTimer(s.finalShowdownTimer);
           if (s.finalLocks) setFinalLocks(s.finalLocks);
+          if (s.finalOptions) setFinalOptions(s.finalOptions);
         }
       }
     },
@@ -1254,10 +1299,11 @@ export default function App() {
         difficulty,
         answerMode,
         finalClue: finalClue && (finalShowdownPhase === 'RESULTS' ? finalClue : hideAnswer(finalClue)),
+        finalOptions,
         seats: remoteSeats,
       },
     });
-  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalShowdownPhase === 'RESULTS', remoteSeats]);
+  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats]);
 
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
@@ -1723,8 +1769,9 @@ export default function App() {
       setPlayer2FinalWager(Math.max(1000, contestants.player2.score));
       setPlayer3FinalWager(Math.max(1000, contestants.analyst.score));
       setFinalLocks(NO_FINAL_LOCKS);
+      setFinalOptions(finalClue ? generateOptions(finalClue, answerMode) : []);
     }
-  }, [deviceRole, activeClue, currentRound, round1Board, round2Board, answeredClueIds, contestants, buzzerSeats]);
+  }, [deviceRole, activeClue, currentRound, round1Board, round2Board, answeredClueIds, contestants, buzzerSeats, finalClue, answerMode, generateOptions]);
 
   // Client: start the Final Showdown wager box at the same amount the host assumes (the whole bank).
   useEffect(() => {
@@ -1818,13 +1865,20 @@ export default function App() {
     if (!finalClue || finalShowdownPhase !== 'CLUE') return;
 
     const threshold = getConfig('fuzzyMatchThreshold') as number;
-    const playerCorrect = checkTypedAnswer(finalPlayerInput, finalClue, threshold);
-    const player2Correct = (isTwoPlayerMode || isClientConnected) ? checkTypedAnswer(finalPlayer2Input, finalClue, threshold) : false;
+    // Multiple choice needs the exact option; typed answers get the usual spelling tolerance.
+    const isRight = (input: string) =>
+      finalOptions.length
+        ? input.trim().toLowerCase() === finalClue.correctAnswer.trim().toLowerCase()
+        : checkTypedAnswer(input, finalClue, threshold);
+    const playerCorrect = isRight(finalPlayerInput);
+    const player2Correct = (isTwoPlayerMode || isClientConnected) ? isRight(finalPlayer2Input) : false;
 
     const coachCorrect = Math.random() < aiConfig.coachAcc;
-    const analystCorrect = player3Human
-      ? checkTypedAnswer(finalPlayer3Input, finalClue, threshold)
-      : Math.random() < aiConfig.analystAcc;
+    const analystCorrect = player3Human ? isRight(finalPlayer3Input) : Math.random() < aiConfig.analystAcc;
+    // A wrong AI answer is one of the choices everyone else saw.
+    const wrongChoices = finalOptions.length
+      ? finalOptions.filter((o) => o !== finalClue.correctAnswer)
+      : finalClue.distractors;
 
     const coachScoreDelta = coachCorrect ? contestants.coach.wager : -contestants.coach.wager;
     const analystScoreDelta = analystCorrect ? contestants.analyst.wager : -contestants.analyst.wager;
@@ -1843,7 +1897,7 @@ export default function App() {
         score: finalCoachScore,
         reaction: coachCorrect ? 'correct' : 'wrong',
         finalCorrect: coachCorrect,
-        finalAnswer: coachCorrect ? finalClue.correctAnswer : finalClue.distractors[0],
+        finalAnswer: coachCorrect ? finalClue.correctAnswer : wrongChoices[0] || '(No Answer)',
       },
       analyst: {
         ...c.analyst,
@@ -1854,7 +1908,7 @@ export default function App() {
           ? finalPlayer3Input || '(No Answer)'
           : analystCorrect
           ? finalClue.correctAnswer
-          : finalClue.distractors[1],
+          : wrongChoices[1] || wrongChoices[0] || '(No Answer)',
       },
       player: {
         ...c.player,
@@ -1901,7 +1955,7 @@ export default function App() {
       gameAudio.playDefeatMotif();
       setGameState((prev) => ({...prev, status: 'GAME_OVER', score: finalPlayerScore}));
     }
-  }, [finalClue, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
+  }, [finalClue, finalOptions, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
 
   // With friends on phones, the Final waits until each player has locked in (or the clock runs out).
   const allRemoteWagersLocked = onlineRemoteSeats.every((seat) => finalLocks.wager[seat]);
@@ -2411,6 +2465,16 @@ export default function App() {
                     </div>
                   ) : (
                     <>
+                      {finalOptions.length ? (
+                        <FinalChoices
+                          options={finalOptions}
+                          value={finalPlayer2Input}
+                          onPick={(opt) => {
+                            setFinalPlayer2Input(opt);
+                            sendAnswer(opt);
+                          }}
+                        />
+                      ) : (
                       <input
                         type="text"
                         placeholder="Type final answer..."
@@ -2421,6 +2485,7 @@ export default function App() {
                         }}
                         className="w-full bg-slate-950 border-2 border-amber-400 px-3 py-2 rounded-lg text-white font-bold text-center"
                       />
+                      )}
                       <VoiceAnswerButton
                         label="SAY FINAL ANSWER"
                         onHeard={(heard) =>
@@ -2869,6 +2934,19 @@ export default function App() {
                   </div>
 
                   <div className="w-full max-w-md flex flex-col gap-2.5">
+                    {finalOptions.length ? (
+                      <>
+                        {(isTwoPlayerMode || isClientConnected) && (
+                          <div className="text-xs font-bold text-amber-300">{playerName} (P1), pick your answer:</div>
+                        )}
+                        <FinalChoices
+                          options={finalOptions}
+                          value={finalPlayerInput}
+                          onPick={setFinalPlayerInput}
+                          disabled={Boolean(finalLocks.answer.player)}
+                        />
+                      </>
+                    ) : (
                     <input
                       type="text"
                       placeholder={(isTwoPlayerMode || isClientConnected) ? `${playerName} (P1): Type final answer...` : 'Type your final answer here...'}
@@ -2878,9 +2956,15 @@ export default function App() {
                       autoFocus
                       className="w-full bg-slate-950 border-2 border-amber-500 text-white text-sm sm:text-base font-bold px-4 py-2 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
+                    )}
                     <VoiceAnswerButton label="SAY FINAL ANSWER" onHeard={(heard) => finalAnswerByVoice(heard, setFinalPlayerInput)} />
 
-                    {(isTwoPlayerMode || isClientConnected) && !isClientConnected && (
+                    {(isTwoPlayerMode || isClientConnected) && !isClientConnected && (finalOptions.length ? (
+                      <>
+                        <div className="text-xs font-bold text-emerald-300">Player 2, pick your answer:</div>
+                        <FinalChoices options={finalOptions} value={finalPlayer2Input} onPick={setFinalPlayer2Input} />
+                      </>
+                    ) : (
                       <input
                         type="text"
                         placeholder="Player 2: Type final answer..."
@@ -2888,7 +2972,7 @@ export default function App() {
                         onChange={(e) => setFinalPlayer2Input(e.target.value)}
                         className="w-full bg-slate-950 border-2 border-amber-500 text-white text-sm sm:text-base font-bold px-4 py-2 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
                       />
-                    )}
+                    ))}
 
                     {/* With friends on phones, Player 1 locks their own answer instead of ending the round for everyone */}
                     {onlineRemoteSeats.length > 0 ? (
