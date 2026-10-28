@@ -1,0 +1,29 @@
+name: Refresh NFL questions
+
+# Rebuilds public/questions/nfl.json from the latest nflverse data every
+# Tuesday morning, after Monday Night Football.
+on:
+  schedule:
+    - cron: '0 12 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run questions
+      - name: Commit updated questions
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/questions/nfl.json
+          git diff --cached --quiet || git commit -m "Refresh NFL questions"
+          git push
