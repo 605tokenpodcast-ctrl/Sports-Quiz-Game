@@ -396,6 +396,11 @@ export default function App() {
   // Early buzzer lockout flash
   const [earlyBuzzFlash, setEarlyBuzzFlash] = useState(false);
 
+  // Client: what this phone's player is typing. Kept apart from activeClue because the
+  // host's state sync replaces activeClue several times a second.
+  const [clientTypedInput, setClientTypedInput] = useState('');
+  useEffect(() => setClientTypedInput(''), [activeClue?.clue.id, activeClue?.buzzedContestantId]);
+
   // P2P Manager Ref
   const p2pRef = useRef<P2PConnectionManager | null>(null);
 
@@ -972,26 +977,31 @@ export default function App() {
             setActiveClue((prev) => {
               if (!prev || !prev.isBonusWager || prev.bonusSelectingPlayerId !== seat || prev.bonusWagerLocked) return prev;
               const isLock = Boolean(msg.lockIn);
+              const maxWager = Math.max(currentRound === 'ROUND_1' ? 1000 : 2000, contestants[seat]?.score || 0);
+              const wager = Math.max(5, Math.min(maxWager, Math.round(Number(msg.wager)) || 5));
               if (isLock) {
                 gameAudio.playConfirmSelect();
               }
               return {
                 ...prev,
-                bonusWagerInput: msg.wager,
+                bonusWagerInput: wager,
                 bonusWagerLocked: isLock,
                 timer: isLock ? 12.0 : prev.timer,
                 maxTimer: isLock ? 12.0 : prev.maxTimer,
                 feedbackText: isLock
-                  ? `${contestants[seat]?.name || seatLabel(seat)} locked wager at $${msg.wager.toLocaleString()}! Provide answer.`
+                  ? `${contestants[seat]?.name || seatLabel(seat)} locked wager at $${wager.toLocaleString()}! Provide answer.`
                   : prev.feedbackText,
               };
             });
             break;
 
-          case 'CLIENT_FINAL_WAGER':
-            if (seat === 'player2') setPlayer2FinalWager(msg.wager);
-            else setPlayer3FinalWager(msg.wager);
+          case 'CLIENT_FINAL_WAGER': {
+            const maxWager = Math.max(1000, contestants[seat]?.score || 0);
+            const wager = Math.max(0, Math.min(maxWager, Math.round(Number(msg.wager)) || 0));
+            if (seat === 'player2') setPlayer2FinalWager(wager);
+            else setPlayer3FinalWager(wager);
             break;
+          }
 
           case 'CLIENT_FINAL_ANSWER':
             if (seat === 'player2') setFinalPlayer2Input(msg.answer);
@@ -1034,7 +1044,7 @@ export default function App() {
         }
       }
     },
-    [deviceRole, handleContestantBuzz, handleContestantSubmitAnswer, activeSelector, selectClue, showToast, contestants]
+    [deviceRole, handleContestantBuzz, handleContestantSubmitAnswer, activeSelector, selectClue, showToast, contestants, currentRound]
   );
 
   // The connection lives as long as the room. It reads the latest handler through a ref
@@ -1092,44 +1102,40 @@ export default function App() {
     };
   }, [roomCode, deviceRole, showToast]);
 
-  // Host sends STATE_SYNC broadcast to joined friends
+  // Host sends STATE_SYNC broadcasts to joined friends in two parts. The boards and settings
+  // (most of the data) only go out when they change or someone joins. The live part goes out on
+  // every change, which is ten times a second while a clue timer runs.
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
-
-    const snapshot = {
-      gameState,
-      currentRound,
-      round1Board,
-      round2Board,
-      answeredClueIds: Array.from(answeredClueIds),
-      activeSelector,
-      contestants,
-      activeClue,
-      difficulty,
-      answerMode,
-      finalClue,
-      finalShowdownPhase,
-      finalShowdownTimer,
-      seats: remoteSeats,
-    };
-
     p2pRef.current.send({
       type: 'STATE_SYNC',
-      payload: snapshot,
+      payload: {round1Board, round2Board, difficulty, answerMode, finalClue, seats: remoteSeats},
+    });
+  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, remoteSeats]);
+
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || !p2pRef.current) return;
+    p2pRef.current.send({
+      type: 'STATE_SYNC',
+      payload: {
+        gameState,
+        currentRound,
+        answeredClueIds: Array.from(answeredClueIds),
+        activeSelector,
+        contestants,
+        activeClue,
+        finalShowdownPhase,
+        finalShowdownTimer,
+      },
     });
   }, [
     deviceRole,
     gameState,
     currentRound,
-    round1Board,
-    round2Board,
     answeredClueIds,
     activeSelector,
     contestants,
     activeClue,
-    difficulty,
-    answerMode,
-    finalClue,
     finalShowdownPhase,
     finalShowdownTimer,
     remoteSeats,
@@ -1604,6 +1610,14 @@ export default function App() {
     }
   }, [deviceRole, activeClue, currentRound, round1Board, round2Board, answeredClueIds, contestants, isTwoPlayerMode, isClientConnected]);
 
+  // Client: start the Final Showdown wager box at the same amount the host assumes (the whole bank).
+  useEffect(() => {
+    if (deviceRole !== 'CLIENT' || currentRound !== 'FINAL_SHOWDOWN') return;
+    setPlayer2FinalWager(Math.max(1000, contestants[mySeat].score));
+    // Only when the round starts, not on every score sync.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, currentRound, mySeat]);
+
   // Final Showdown Wager Confirmation (Host)
   const confirmFinalWagers = useCallback(() => {
     gameAudio.playConfirmSelect();
@@ -1685,7 +1699,8 @@ export default function App() {
 
   // Final Showdown Resolution (Host)
   const finalizeFinalShowdown = useCallback(() => {
-    if (!finalClue) return;
+    // Runs once: the submit button and the countdown can both get here.
+    if (!finalClue || finalShowdownPhase !== 'CLUE') return;
 
     const threshold = getConfig('fuzzyMatchThreshold') as number;
     const playerCorrect = checkTypedAnswer(finalPlayerInput, finalClue, threshold);
@@ -1766,7 +1781,12 @@ export default function App() {
       gameAudio.playDefeatMotif();
       setGameState((prev) => ({...prev, status: 'GAME_OVER', score: finalPlayerScore}));
     }
-  }, [finalClue, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
+  }, [finalClue, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
+
+  // The countdown reads the latest finalize through a ref. Depending on it directly restarted
+  // the 1-second interval on every keystroke, so the clock stalled while anyone typed.
+  const finalizeFinalShowdownRef = useRef(finalizeFinalShowdown);
+  finalizeFinalShowdownRef.current = finalizeFinalShowdown;
 
   // Final Showdown Clue Timer Loop (Host)
   useEffect(() => {
@@ -1775,7 +1795,8 @@ export default function App() {
     const interval = setInterval(() => {
       setFinalShowdownTimer((prev) => {
         if (prev <= 1) {
-          finalizeFinalShowdown();
+          clearInterval(interval);
+          setTimeout(() => finalizeFinalShowdownRef.current(), 0);
           return 0;
         }
         return prev - 1;
@@ -1783,7 +1804,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [deviceRole, currentRound, finalShowdownPhase, gameState.status, isGameMenuOpen, isLeaderboardOpen, isTagEditorOpen, finalizeFinalShowdown]);
+  }, [deviceRole, currentRound, finalShowdownPhase, gameState.status, isGameMenuOpen, isLeaderboardOpen, isTagEditorOpen]);
 
   // Copy Room Link to Clipboard
   const handleCopyInviteLink = useCallback(() => {
@@ -2126,11 +2147,14 @@ export default function App() {
                       <input
                         type="text"
                         placeholder="Type answer..."
-                        value={activeClue.typedInput}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setActiveClue((prev) => (prev ? {...prev, typedInput: val} : null));
+                        value={clientTypedInput}
+                        onChange={(e) => setClientTypedInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            p2pRef.current?.send({type: 'CLIENT_ANSWER', contestantId: mySeat, answer: clientTypedInput});
+                          }
                         }}
+                        autoFocus
                         className="flex-1 bg-slate-950 border-2 border-amber-400 px-3 py-2 text-white font-bold rounded-lg"
                       />
                       <button
@@ -2138,7 +2162,7 @@ export default function App() {
                           p2pRef.current?.send({
                             type: 'CLIENT_ANSWER',
                             contestantId: mySeat,
-                            answer: activeClue.typedInput,
+                            answer: clientTypedInput,
                           });
                         }}
                         className="px-5 bg-amber-500 text-slate-950 font-black rounded-lg text-sm">
@@ -2237,7 +2261,7 @@ export default function App() {
                       max={Math.max(1000, contestants[mySeat].score)}
                       value={player2FinalWager}
                       onChange={(e) => {
-                        const val = parseInt(e.target.value) || 0;
+                        const val = Math.max(0, Math.min(Math.max(1000, contestants[mySeat].score), parseInt(e.target.value) || 0));
                         setPlayer2FinalWager(val);
                         p2pRef.current?.send({
                           type: 'CLIENT_FINAL_WAGER',

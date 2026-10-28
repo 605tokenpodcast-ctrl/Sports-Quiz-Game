@@ -93,6 +93,14 @@ export function sanitizeQuestionClue(str: string): string {
     .trim();
 }
 
+/** The last word of an answer ("Mahomes"), skipping endings like "Jr." or "St." that would match anything. */
+function lastNameAlias(answer: string): string {
+  const words = answer.toLowerCase().trim().split(/\s+/);
+  const last = words[words.length - 1] || '';
+  if (words.length < 2 || /^(jr|sr|ii|iii|iv|v|st)\.?$/.test(last) || /^\d+$/.test(last)) return '';
+  return last;
+}
+
 export function normalizeAnswer(str: string): string {
   if (!str) return '';
   const sanitized = sanitizeAnswerChoice(str);
@@ -400,7 +408,7 @@ export function getAllCompiledCategories(): TriviaCategory[] {
         aliases: Array.from(
           new Set([
             cleanAnswer.toLowerCase().trim(),
-            cleanAnswer.split(' ').pop()?.toLowerCase().trim() || '',
+            lastNameAlias(cleanAnswer),
             ...(raw.aliases || []).map((a) => sanitizeAnswerChoice(a).toLowerCase().trim()),
           ])
         ).filter(Boolean),

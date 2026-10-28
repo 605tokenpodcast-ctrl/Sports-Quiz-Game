@@ -316,20 +316,35 @@ export function checkTypedAnswer(input: string, clue: QuestionClue, threshold = 
   const clean = (s: string) =>
     s
       .toLowerCase()
+      .replace(/\bst\b\.?/g, 'state') // "Ohio St." and "Ohio State" are the same school
+      .replace(/\b49ers\b/g, 'niners')
       .replace(/[^a-z0-9\s]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
-  const userClean = clean(input);
+  const userClean = clean(input).replace(/^(the|a|an) /, '');
   const correctClean = clean(clue.correctAnswer);
 
   if (userClean === correctClean) return true;
 
+  // Numeric answers (scores, draft rounds, counts) need the exact numbers: "23-17" is not
+  // "23-16" and "Round 3" is not "Round 2", even though the spelling is one character off.
+  const numbersIn = (s: string) => (normalizeSpoken(s).match(/\d+/g) || []).join(' ');
+  const correctNumbers = numbersIn(clue.correctAnswer);
+  if (correctNumbers) return numbersIn(input) === correctNumbers;
+
+  const correctWords = new Set(correctClean.split(' '));
   for (const alias of clue.aliases) {
     const aliasClean = clean(alias);
+    if (!aliasClean) continue;
     if (userClean === aliasClean) return true;
-    if (userClean.length >= 3 && (aliasClean.includes(userClean) || userClean.includes(aliasClean))) {
-      if (userClean.length >= aliasClean.length * 0.7) return true;
+    // A partial answer, like "mahome" for "mahomes".
+    if (userClean.length >= 3 && aliasClean.includes(userClean) && userClean.length >= aliasClean.length * 0.7) return true;
+    // Extra words around an alias are fine ("kc chiefs"), but not a different first name
+    // ("emmitt smith" when the answer is Malcolm Smith).
+    if (userClean.includes(aliasClean) && userClean.length >= 3) {
+      const extra = userClean.split(' ').filter((w) => !aliasClean.split(' ').includes(w));
+      if (extra.every((w) => correctWords.has(w) || w.length <= 2)) return true;
     }
   }
 
