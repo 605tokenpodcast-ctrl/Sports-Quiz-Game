@@ -1,13 +1,8 @@
 /**
- * Sports Arena Quiz - Comprehensive Multi-Difficulty Question Bank & Fuzzy Matcher
- * Powered by Procedural & Curated Sports Trivia Engine
- * 
- * Guarantees:
- * - Questions NEVER repeat within the same game (`usedQuestionIds`).
- * - Categories NEVER repeat within the same game (`usedCategoryIds`).
- * - Answers NEVER repeat within the same game (`usedAnswers` / `normalizeAnswer`).
- * - At least 100 unique questions in every single category.
- * - Reset tracking sets ONLY on starting a completely new game ("Play Again" / "New Game").
+ * Game sessions (boards and the Final Showdown question), answer options, and answer
+ * checking for typed and spoken answers.
+ *
+ * Within one game no question, category or answer repeats.
  */
 
 export * from './triviaEngine';
@@ -28,9 +23,8 @@ import {
   TriviaCategory,
 } from './triviaEngine';
 
-// Deep Championship Showdown Final Clues Pool
+// Hand-written Final Showdown questions. Hard questions from the main bank join them at game time.
 const RAW_FINAL_SHOWDOWN_QUESTIONS: QuestionClue[] = [
-  ...getChampionshipFinalClues(),
   {
     id: 'final_nfl_immortal_1',
     category: 'CHAMPIONSHIP IMMORTALS',
@@ -40,61 +34,6 @@ const RAW_FINAL_SHOWDOWN_QUESTIONS: QuestionClue[] = [
     distractors: ['Peyton Manning', 'Joe Montana', 'Kurt Warner', 'Brett Favre', 'Drew Brees', 'Patrick Mahomes', 'Eli Manning'],
     aliases: ['brady', 'tom brady', 'tb12', 'thomas brady'],
     sport: 'NFL',
-    difficulty: 5,
-  },
-  {
-    id: 'final_nba_legend_2',
-    category: 'HISTORIC DYNASTIES',
-    value: 0,
-    clue: 'This head coach won 11 NBA Championships coaching the Chicago Bulls and Los Angeles Lakers, utilizing the famous Triangle Offense.',
-    correctAnswer: 'Phil Jackson',
-    distractors: ['Pat Riley', 'Gregg Popovich', 'Red Auerbach', 'Steve Kerr', 'Chuck Daly', 'Larry Brown', 'Doc Rivers'],
-    aliases: ['jackson', 'phil jackson', 'zen master'],
-    sport: 'NBA',
-    difficulty: 5,
-  },
-  {
-    id: 'final_mlb_barrier_3',
-    category: 'BASEBALL MILESTONES',
-    value: 0,
-    clue: "On April 15, 1947, he broke Major League Baseball's color barrier by starting at first base for the Brooklyn Dodgers wearing jersey #42.",
-    correctAnswer: 'Jackie Robinson',
-    distractors: ['Satchel Paige', 'Roy Campanella', 'Larry Doby', 'Hank Aaron', 'Willie Mays', 'Monte Irvin', 'Don Newcombe'],
-    aliases: ['robinson', 'jackie robinson', 'jack robinson', '42'],
-    sport: 'MLB',
-    difficulty: 5,
-  },
-  {
-    id: 'final_ncaa_heisman_4',
-    category: 'HEISMAN IMMORTALS',
-    value: 0,
-    clue: 'In 1988, this Oklahoma State running back set the unbreakable single-season NCAA record with 2,628 rushing yards and 37 touchdowns in just 11 games.',
-    correctAnswer: 'Barry Sanders',
-    distractors: ['Bo Jackson', 'Herschel Walker', 'Archie Griffin', 'Ricky Williams', 'Derrick Henry', 'Reggie Bush', 'Marcus Allen'],
-    aliases: ['barry sanders', 'sanders'],
-    sport: 'NCAA_FOOTBALL',
-    difficulty: 5,
-  },
-  {
-    id: 'final_nhl_greatone_5',
-    category: 'NHL LEGENDS',
-    value: 0,
-    clue: 'Known as "The Great One", this center scored 50 goals in just 39 games in 1981-82 and finished his career with an NHL record 2,857 points.',
-    correctAnswer: 'Wayne Gretzky',
-    distractors: ['Mario Lemieux', 'Gordie Howe', 'Bobby Orr', 'Jaromir Jagr', 'Sidney Crosby', 'Alex Ovechkin', 'Mark Messier'],
-    aliases: ['gretzky', 'wayne gretzky', 'the great one', 'great one', '99'],
-    sport: 'NHL',
-    difficulty: 5,
-  },
-  {
-    id: 'final_march_madness_6',
-    category: 'MARCH MADNESS DYNASTIES',
-    value: 0,
-    clue: "Known as the \"Wizard of Westwood\", this legendary head coach led the UCLA Bruins men's basketball team to 10 NCAA National Championships in a 12-year span, including 7 consecutive titles.",
-    correctAnswer: 'John Wooden',
-    distractors: ['Mike Krzyzewski', 'Dean Smith', 'Bob Knight', 'Adolph Rupp', 'Jim Calhoun', 'Roy Williams', 'Lute Olson'],
-    aliases: ['wooden', 'john wooden', 'wizard of westwood'],
-    sport: 'NCAA_BASKETBALL',
     difficulty: 5,
   },
   {
@@ -108,42 +47,8 @@ const RAW_FINAL_SHOWDOWN_QUESTIONS: QuestionClue[] = [
     sport: 'NFL',
     difficulty: 5,
   },
-  {
-    id: 'final_nba_100point_8',
-    category: 'UNTOUCHABLE RECORDS',
-    value: 0,
-    clue: 'On March 2, 1962 in Hershey, Pennsylvania, which Philadelphia Warriors center scored an all-time NBA record 100 points in a single regular season game against the New York Knicks?',
-    correctAnswer: 'Wilt Chamberlain',
-    distractors: ['Bill Russell', 'Elgin Baylor', 'Oscar Robertson', 'Bob Pettit', 'Jerry West', 'Walt Bellamy', 'Richie Guerin'],
-    aliases: ['chamberlain', 'wilt chamberlain', 'the big dipper', 'wilt the stilt'],
-    sport: 'NBA',
-    difficulty: 5,
-  },
-  {
-    id: 'final_mlb_streak_9',
-    category: 'THE HIT KING',
-    value: 0,
-    clue: "In 1941, which New York Yankees center fielder established baseball's iconic hitting streak record by hitting safely in 56 consecutive games?",
-    correctAnswer: 'Joe DiMaggio',
-    distractors: ['Ted Williams', 'Stan Musial', 'Lou Gehrig', 'Hank Greenberg', 'Charlie Keller', 'Pete Rose', 'Ty Cobb'],
-    aliases: ['dimaggio', 'joe dimaggio', 'the yankee clipper', 'joltin joe'],
-    sport: 'MLB',
-    difficulty: 5,
-  },
-  {
-    id: 'final_nhl_wins_10',
-    category: 'GOALTENDING IMMORTALITY',
-    value: 0,
-    clue: 'Which New Jersey Devils goaltender holds the all-time NHL regular-season records for both career goalie wins and career shutouts?',
-    correctAnswer: 'Martin Brodeur',
-    distractors: ['Patrick Roy', 'Dominik Hasek', 'Ed Belfour', 'Roberto Luongo', 'Henrik Lundqvist', 'Terry Sawchuk', 'Curtis Joseph'],
-    aliases: ['brodeur', 'martin brodeur'],
-    sport: 'NHL',
-    difficulty: 5,
-  },
 ];
 
-// Deep Championship Showdown Final Clues Pool
 export const FINAL_SHOWDOWN_QUESTIONS: QuestionClue[] = RAW_FINAL_SHOWDOWN_QUESTIONS.map((q) => ({
   ...q,
   clue: sanitizeQuestionClue(q.clue),
