@@ -331,6 +331,31 @@ class GameAudio {
     });
   }
 
+  /**
+   * Each seat's own buzz-in sound, so listeners can tell who buzzed without seeing the screen.
+   * P1 rings a bell, P2 honks a horn, P3 (or Stats Riley) chirps and Coach Dave blows a whistle.
+   */
+  playBuzzIn(seat: 'player' | 'player2' | 'analyst' | 'coach') {
+    const b = this.begin();
+    if (!b) return;
+    if (seat === 'player') {
+      this.blip(b, b.now, { type: 'square', freq: 1046.5, dur: 0.12, gain: 0.09 });
+      this.blip(b, b.now + 0.1, { type: 'square', freq: 1568, dur: 0.3, gain: 0.08 });
+      this.blip(b, b.now + 0.1, { type: 'sine', freq: 3136, dur: 0.3, gain: 0.03 });
+    } else if (seat === 'player2') {
+      this.blip(b, b.now, { type: 'sawtooth', freq: 233, freqTo: 220, dur: 0.42, gain: 0.09 });
+      this.blip(b, b.now, { type: 'sawtooth', freq: 294, freqTo: 277, dur: 0.42, gain: 0.07 });
+    } else if (seat === 'analyst') {
+      [1400, 1760, 2100].forEach((freq, i) => {
+        this.blip(b, b.now + i * 0.08, { type: 'triangle', freq, freqTo: freq * 1.15, dur: 0.07, gain: 0.1 });
+      });
+    } else {
+      for (let i = 0; i < 6; i++) {
+        this.blip(b, b.now + i * 0.05, { type: 'sine', freq: i % 2 ? 2300 : 2050, dur: 0.05, gain: 0.08 });
+      }
+    }
+  }
+
   playLevelUpStinger() {
     const b = this.begin();
     if (!b) return;

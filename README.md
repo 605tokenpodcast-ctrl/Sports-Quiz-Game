@@ -25,6 +25,7 @@ Daily Double) to play a short game while testing.
 - `game/rules.ts`, `game/types.ts`: the game rules (clocks, scoring, wagers) as plain functions, and shared types.
 - `host/`: the host screen's parts (scoreboard, board and Final, clue card, menus, leaderboards, results).
 - `phone/PhoneScreen.tsx`: a friend's phone.
+- `screen/StreamScreen.tsx`: the big-screen stream view.
 - `triviaData.ts`, `triviaEngine.ts`: loading questions, building boards, checking answers.
 - `utils/`, `ui/`: multiplayer connection, voice answers, sounds, leaderboard and other helpers.
 
@@ -38,7 +39,8 @@ npm run questions
 ```
 
 The **Refresh NFL questions** GitHub Action does this every Tuesday, which keeps the
-"this week" and "this season" categories current. Each device remembers
+"this week" and "this season" categories current. Every game has one current column on
+each board: **This Week in the NFL** in Round 1 and the **season so far** in Round 2. Each device remembers
 which questions it has seen and skips them until it runs out.
 `npm run simulate` plays 40 simulated games and reports how often questions repeat.
 
@@ -55,6 +57,28 @@ To test multiplayer offline, run your own signaling server and point the game at
 npx peerjs --port 9000
 VITE_PEER_HOST=localhost VITE_PEER_PORT=9000 VITE_PEER_SECURE=false npm run dev
 ```
+
+## Streaming or recording
+
+Open **Invite Phones** on the host and copy the **Stream Screen** link (it ends in
+`role=screen`). Open it on a laptop or TV and click once to turn on its sound. It shows the
+board, each clue, who buzzed, the Final Showdown and the results in big type, with the join
+QR code, and it doesn't take a player seat. Everyone keeps playing on their phones.
+
+**Read Clues Aloud** (on the start screen and in the menu) has the browser's voice read each
+clue, and the buzzers open once it has been read. The answer is read when it's shown. The
+stream screen does the reading when one is connected, otherwise the host device does.
+
+Each seat has its own buzz-in sound so listeners can tell who buzzed: P1 rings a bell, P2
+honks a horn, P3 (or Stats Riley) chirps and Coach Dave blows a whistle.
+
+After the game, **Share Recap Card** makes a 1080 x 1350 image with the final standings and
+best moments, for social posts. Phones open the share sheet; computers download it.
+
+## Final Showdown
+
+Like on TV, only players with money in the bank play the Final Showdown. Anyone at $0 or
+below sits it out and keeps their score. If nobody has money, the scores stand.
 
 ## Answering by voice
 

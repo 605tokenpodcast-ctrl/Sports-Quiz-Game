@@ -46,6 +46,10 @@ export default function Stage() {
     allRemoteWagersLocked,
     activeContestantsList,
   } = useGame();
+  // Players at $0 or below sit out the Final Showdown.
+  const sitsOut = (id: 'player' | 'player2' | 'analyst' | 'coach') => Boolean(contestants[id].sitsOutFinal);
+  const nobodyPlays = activeContestantsList.every(sitsOut);
+  const aiSitters = activeContestantsList.filter((id) => sitsOut(id) && (id === 'coach' || (id === 'analyst' && !player3Human)));
   return (
     <>
       <main className="relative z-10 flex-1 w-full min-h-0 flex flex-col justify-between overflow-hidden p-2 sm:p-4">
@@ -155,11 +159,16 @@ export default function Stage() {
               {finalShowdownPhase === 'WAGER' && (
                 <div className="w-full flex flex-col items-center gap-3">
                   <p className="text-xs sm:text-sm text-slate-300 max-w-md">
-                    Lock in your cash wager based on your confidence in this championship category.
+                    {nobodyPlays
+                      ? 'Nobody has money in the bank, so nobody can play the Final Showdown. The scores stand.'
+                      : 'Lock in your cash wager based on your confidence in this championship category. Players at $0 or below sit this one out.'}
                   </p>
 
                   <div className="w-full max-w-sm flex flex-col gap-3">
                     {/* Player 1 Wager Input */}
+                    {sitsOut('player') ? (
+                      <SitOutRow name={contestants.player.name} score={contestants.player.score} />
+                    ) : (
                     <div className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/50">
                       <div className="text-xs font-bold text-amber-300 mb-1">
                         {contestants.player.name} (Bank: ${contestants.player.score.toLocaleString()}):
@@ -189,9 +198,12 @@ export default function Stage() {
                         </button>
                       </div>
                     </div>
+                    )}
 
                     {/* Friends on phones set their own wagers; the host only sees whether they've locked */}
-                    {onlineRemoteSeats.map((seat) => (
+                    {onlineRemoteSeats.map((seat) => sitsOut(seat) ? (
+                      <SitOutRow key={seat} name={contestants[seat].name} score={contestants[seat].score} />
+                    ) : (
                       <div key={seat} className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/50 flex items-center justify-between gap-2 text-xs font-bold">
                         <span className="text-amber-300">{contestants[seat].name}</span>
                         <span className={finalLocks.wager[seat] ? 'text-emerald-400' : 'text-slate-400 animate-pulse'}>
@@ -201,7 +213,10 @@ export default function Stage() {
                     ))}
 
                     {/* Player 2 Wager Input in pass & play */}
-                    {isTwoPlayerMode && !isClientConnected && (
+                    {isTwoPlayerMode && !isClientConnected && sitsOut('player2') && (
+                      <SitOutRow name={contestants.player2.name} score={contestants.player2.score} />
+                    )}
+                    {isTwoPlayerMode && !isClientConnected && !sitsOut('player2') && (
                       <div className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/50">
                         <div className="text-xs font-bold text-amber-300 mb-1">
                           {contestants.player2.name} (Bank: ${contestants.player2.score.toLocaleString()}):
@@ -234,6 +249,18 @@ export default function Stage() {
                     )}
                   </div>
 
+                  {aiSitters.map((id) => (
+                    <div key={id} className="text-[11px] text-slate-400">{contestants[id].name} sits out (no money in the bank).</div>
+                  ))}
+
+                  {nobodyPlays ? (
+                  <button
+                    onClick={finalizeFinalShowdown}
+                    className="min-w-[48px] min-h-[48px] mt-2 px-6 sm:px-8 py-3 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-sm sm:text-base shadow-lg transition-transform active:scale-95 flex items-center gap-2">
+                    <Zap className="w-5 h-5" />
+                    SEE FINAL RESULTS
+                  </button>
+                  ) : (
                   <button
                     onClick={confirmFinalWagers}
                     disabled={!allRemoteWagersLocked}
@@ -241,6 +268,7 @@ export default function Stage() {
                     <Zap className="w-5 h-5" />
                     {allRemoteWagersLocked ? 'LOCK IN WAGER & REVEAL CLUE' : 'WAITING FOR WAGERS...'}
                   </button>
+                  )}
                 </div>
               )}
 
@@ -256,6 +284,12 @@ export default function Stage() {
                   </div>
 
                   <div className="w-full max-w-md flex flex-col gap-2.5">
+                    {sitsOut('player') ? (
+                      <div className="text-xs font-bold text-slate-400">
+                        {contestants.player.name} sits out the Final (no money in the bank).
+                      </div>
+                    ) : (
+                    <>
                     {finalOptions.length ? (
                       <>
                         {(isTwoPlayerMode || isClientConnected) && (
@@ -280,8 +314,13 @@ export default function Stage() {
                     />
                     )}
                     <VoiceAnswerButton label="SAY FINAL ANSWER" onHeard={(heard) => finalAnswerByVoice(heard, setFinalPlayerInput)} />
+                    </>
+                    )}
 
-                    {(isTwoPlayerMode || isClientConnected) && !isClientConnected && (finalOptions.length ? (
+                    {isTwoPlayerMode && !isClientConnected && sitsOut('player2') && (
+                      <div className="text-xs font-bold text-slate-400">{contestants.player2.name} sits out the Final.</div>
+                    )}
+                    {isTwoPlayerMode && !isClientConnected && !sitsOut('player2') && (finalOptions.length ? (
                       <>
                         <div className="text-xs font-bold text-emerald-300">Player 2, pick your answer:</div>
                         <FinalChoices options={finalOptions} value={finalPlayer2Input} onPick={setFinalPlayer2Input} />
@@ -299,6 +338,7 @@ export default function Stage() {
                     {/* With friends on phones, Player 1 locks their own answer instead of ending the round for everyone */}
                     {onlineRemoteSeats.length > 0 ? (
                       <>
+                        {!sitsOut('player') && (
                         <button
                           onClick={() => setFinalLocks((l) => ({...l, answer: {...l.answer, player: true}}))}
                           disabled={Boolean(finalLocks.answer.player)}
@@ -306,10 +346,11 @@ export default function Stage() {
                           <CheckCircle2 className="w-5 h-5" />
                           {finalLocks.answer.player ? 'ANSWER LOCKED' : 'LOCK IN MY ANSWER'}
                         </button>
+                        )}
                         <div className="text-[11px] text-slate-300 flex flex-wrap justify-center gap-x-3">
                           {onlineRemoteSeats.map((seat) => (
                             <span key={seat} className={finalLocks.answer[seat] ? 'text-emerald-400' : 'text-slate-400'}>
-                              {contestants[seat].name}: {finalLocks.answer[seat] ? '✓ locked' : 'thinking...'}
+                              {contestants[seat].name}: {sitsOut(seat) ? 'sitting out' : finalLocks.answer[seat] ? '✓ locked' : 'thinking...'}
                             </span>
                           ))}
                         </div>
@@ -319,7 +360,7 @@ export default function Stage() {
                         onClick={finalizeFinalShowdown}
                         className="min-w-[48px] min-h-[48px] w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-lg shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 text-sm sm:text-base">
                         <CheckCircle2 className="w-5 h-5" />
-                        SUBMIT FINAL ANSWER
+                        {sitsOut('player') && !(isTwoPlayerMode && !sitsOut('player2')) ? 'SHOW RESULTS' : 'SUBMIT FINAL ANSWER'}
                       </button>
                     )}
                   </div>
@@ -335,6 +376,15 @@ export default function Stage() {
                   <div className="w-full grid grid-cols-3 gap-2">
                     {activeContestantsList.map((id) => {
                       const c = contestants[id];
+                      if (c.sitsOutFinal) {
+                        return (
+                          <div key={id} className="p-2 sm:p-3 rounded-lg border bg-slate-950/80 border-slate-700 text-slate-400">
+                            <div className="text-[9px] sm:text-[10px] font-bold uppercase">{c.name}</div>
+                            <div className="text-[11px] sm:text-xs font-semibold my-1">Sat out</div>
+                            <div className="text-xs font-black">$0</div>
+                          </div>
+                        );
+                      }
                       return (
                         <div
                           key={id}
@@ -474,5 +524,15 @@ export default function Stage() {
         </div>
       </main>
     </>
+  );
+}
+
+// A player with no money in the bank, who sits out the Final Showdown.
+function SitOutRow({name, score}: {name: string; score: number}) {
+  return (
+    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-700 flex items-center justify-between gap-2 text-xs font-bold">
+      <span className="text-slate-300">{name}</span>
+      <span className="text-slate-400">Sits out ({score < 0 ? '-' : ''}${Math.abs(score).toLocaleString()})</span>
+    </div>
   );
 }

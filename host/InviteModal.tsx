@@ -1,5 +1,5 @@
 // Inviting friends: QR code and room code, pass and play, or joining another game.
-import {RotateCw, Users, Share2, Copy, Smartphone, QrCode, ExternalLink, Gamepad2} from 'lucide-react';
+import {RotateCw, Users, Share2, Copy, Smartphone, QrCode, ExternalLink, Gamepad2, Tv} from 'lucide-react';
 import {gameAudio, MenuOverlay} from '../utils/helper';
 import {QRCodeView} from '../ui/shared';
 import {useGame} from '../game/GameContext';
@@ -23,6 +23,8 @@ export default function InviteModal() {
     generateRoomCode,
     handleCopyInviteLink,
     handleCopyRoomCode,
+    streamScreenUrl,
+    screenCount,
   } = useGame();
   return (
     <>
@@ -157,6 +159,46 @@ export default function InviteModal() {
                       <span>Test New Tab</span>
                     </a>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Stream screen: a big-screen view for a laptop or TV, which only watches */}
+            {inviteModalTab === 'separate' && (
+              <div className="mt-3 bg-slate-950 p-3 rounded-xl border border-blue-700/60 flex flex-col gap-2 text-xs text-slate-300">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-black text-blue-200 uppercase">
+                    <Tv className="w-4 h-4 text-amber-400" />
+                    <span>Stream Screen</span>
+                  </div>
+                  <span className={`text-[10px] font-bold ${screenCount ? 'text-emerald-400' : 'text-slate-500'}`}>
+                    {screenCount ? '🟢 Connected' : 'Not connected'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-tight">
+                  Streaming or recording? Open this link on a laptop or TV for a big board with the clues, scores and join QR code.
+                  Everyone still plays from their phone. It doesn't take a player seat.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      navigator.clipboard
+                        .writeText(streamScreenUrl)
+                        .then(() => showToast('✓ Stream screen link copied!'))
+                        .catch(() => showToast(streamScreenUrl))
+                    }
+                    className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5">
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>COPY STREAM LINK</span>
+                  </button>
+                  <a
+                    href={streamScreenUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-lg flex items-center gap-1">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open</span>
+                  </a>
                 </div>
               </div>
             )}

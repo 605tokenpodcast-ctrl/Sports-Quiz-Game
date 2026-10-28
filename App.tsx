@@ -5,6 +5,7 @@ import {IMG_STUDIO} from './ui/shared';
 import {GameContext} from './game/GameContext';
 import {useGameController} from './game/useGameController';
 import PhoneScreen from './phone/PhoneScreen';
+import StreamScreen from './screen/StreamScreen';
 import Scoreboard from './host/Scoreboard';
 import Stage from './host/Stage';
 import ClueCard from './host/ClueCard';
@@ -25,6 +26,14 @@ export default function App() {
     return (
       <GameContext.Provider value={game}>
         <PhoneScreen />
+      </GameContext.Provider>
+    );
+  }
+  // A laptop or TV showing the game big for a stream or recording.
+  if (deviceRole === 'SCREEN') {
+    return (
+      <GameContext.Provider value={game}>
+        <StreamScreen />
       </GameContext.Provider>
     );
   }

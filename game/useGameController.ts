@@ -19,10 +19,14 @@ import {
   TriviaCategory,
 } from '../triviaData';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
+import {isSpeechSupported, speak, spokenMoney, stopSpeaking, unlockSpeech} from '../utils/speech';
+import {drawRecapCard, shareRecapCard} from '../utils/recapCard';
+import {recapMoments} from './recap';
 import {
   ActiveClueState,
   AIDifficulty,
   AnswerMode,
+  BigPlay,
   Contestant,
   ContestantId,
   Countdown,
@@ -54,6 +58,8 @@ import {
   isFinalAnswerRight,
   maxFinalWager,
   pauseCountdown,
+  playsFinal,
+  readingSeconds,
   resolveAnswer,
   resumeCountdown,
   scoreAnswer,
@@ -72,6 +78,10 @@ import {
 } from '../utils/leaderboard';
 import {BGM_TRIVIA, BGM_FINAL} from '../ui/shared';
 
+// What is read aloud when a clue opens.
+const spokenClue = (clue: QuestionClue) => `${clue.category}, for ${spokenMoney(clue.value)}. ${clue.clue}`;
+const spokenFinal = (clue: QuestionClue) => `The Final Showdown. ${clue.category}. ${clue.clue}`;
+
 export function useGameController() {
   // Audio mute controls: Music MUST be OFF by default, SFX MUST be ON by default
   const [sfxMuted, setSfxMuted] = useState(false);
@@ -83,6 +93,7 @@ export function useGameController() {
     const params = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const roleParam = params.get('role') || hashParams.get('role');
+    if (roleParam === 'screen') return 'SCREEN';
     return roleParam === 'join' || roleParam === 'client' ? 'CLIENT' : 'HOST';
   });
 
@@ -141,6 +152,24 @@ export function useGameController() {
   // Full: 6 categories x 5 clues per round. Short: 5 categories x 3 clues per round.
   const [gameLength, setGameLength] = useState<GameLength>('FULL');
   const [isTwoPlayerMode, setIsTwoPlayerMode] = useState(false);
+  // Read each clue aloud. The buzzers wait until it has been read. The stream screen does the
+  // reading when one is connected, otherwise the host device does.
+  const [readAloud, setReadAloudState] = useState(() => {
+    try {
+      return isSpeechSupported && localStorage.getItem('read_aloud') === 'on';
+    } catch {
+      return false;
+    }
+  });
+  const setReadAloud = useCallback((on: boolean) => {
+    setReadAloudState(on);
+    if (on) unlockSpeech();
+    try {
+      localStorage.setItem('read_aloud', on ? 'on' : 'off');
+    } catch {
+      // Private browsing: the setting just isn't remembered.
+    }
+  }, []);
 
   // Core Game State
   const [gameState, setGameState] = useState<GameState>({
@@ -261,6 +290,9 @@ export function useGameController() {
   // Multiple choice games get choices in the Final too (empty for typed and mic-only games).
   const [finalOptions, setFinalOptions] = useState<string[]>([]);
 
+  // The biggest single win of the match, for the recap.
+  const [bigPlay, setBigPlay] = useState<BigPlay | null>(null);
+
   // Match statistics for post-game
   const [matchStats, setMatchStats] = useState<MatchStats>({
     totalQuestions: 0,
@@ -290,6 +322,11 @@ export function useGameController() {
   const [remoteSeats, setRemoteSeats] = useState<Record<string, RemoteSeat>>({});
   const remoteSeatsRef = useRef(remoteSeats);
   const [mySeat, setMySeat] = useState<RemoteSeat>('player2');
+  // Host: stream screens watching this game, by PeerJS id.
+  const screenPeersRef = useRef(new Set<string>());
+  const [screenCount, setScreenCount] = useState(0);
+  // Stream screen: the podium lineup the host is showing.
+  const [syncedLineup, setSyncedLineup] = useState<ContestantId[]>(['player', 'player2', 'analyst']);
   const player3Human = Object.values(remoteSeats).includes('analyst');
   const onlineRemoteSeats = Object.values(remoteSeats);
   const isHumanSeat = (id: ContestantId) => id === 'player' || id === 'player2' || (id === 'analyst' && player3Human);
@@ -308,6 +345,15 @@ export function useGameController() {
         : ['player', 'coach', 'analyst'],
     [isTwoPlayerMode, isClientConnected, player2Away]
   );
+
+  // The podium lineup. A stream screen shows whatever the host shows.
+  const activeContestantsList = useMemo(() => {
+    if (deviceRole === 'SCREEN') return syncedLineup;
+    if (isTwoPlayerMode || isClientConnected) {
+      return ['player', 'player2', 'analyst'] as ContestantId[];
+    }
+    return ['coach', 'player', 'analyst'] as ContestantId[];
+  }, [deviceRole, syncedLineup, isTwoPlayerMode, isClientConnected]);
 
   // Final Showdown: which players have locked their wager and their answer.
   const [finalLocks, setFinalLocks] = useState<FinalLocks>(NO_FINAL_LOCKS);
@@ -394,6 +440,7 @@ export function useGameController() {
     const base = `${window.location.origin}${window.location.pathname}`;
     return `${base}?room=${encodeURIComponent(roomCode)}&role=join`;
   }, [roomCode]);
+  const streamScreenUrl = shareableJoinUrl.replace(/role=join$/, 'role=screen');
 
   // Sync SDK lifecycle score with player's cash bankroll
   useEffect(() => {
@@ -473,6 +520,11 @@ export function useGameController() {
   // AI reflex and accuracy configuration
   const aiConfig = useMemo(() => aiSettings(difficulty), [difficulty]);
 
+  // A Daily Double's answer clock, which starts once the wager is in. Read aloud, it also
+  // gets the time it takes to read the clue.
+  const dailyDoubleClock = (clue: QuestionClue, now: number) =>
+    startCountdown(TIMES.dailyDouble + (readAloud ? readingSeconds(clue.clue, 0) : 0), now);
+
   // Helper to shuffle distractors and construct options array with guaranteed 8-choice / 4-choice integrity
   const generateOptions = useCallback((clue: QuestionClue, mode: AnswerMode): string[] => {
     if (isOpenAnswerMode(mode)) return [];
@@ -539,7 +591,12 @@ export function useGameController() {
         buzzedContestantId: isBonus ? pickerId : null,
         buzzerLockout: {coach: false, player: false, analyst: false, player2: false},
         // A Daily Double's clock waits for the wager.
-        ...(isBonus ? frozenCountdown(TIMES.dailyDouble) : startCountdown(SETTINGS.buzzerLightDelay, Date.now())),
+        ...(isBonus
+          ? frozenCountdown(TIMES.dailyDouble)
+          : startCountdown(
+              readAloud ? readingSeconds(spokenClue(clue), SETTINGS.buzzerLightDelay) : SETTINGS.buzzerLightDelay,
+              Date.now()
+            )),
         options,
         isBonusWager: isBonus,
         bonusSelectingPlayerId: pickerId,
@@ -567,7 +624,7 @@ export function useGameController() {
         player2: {...prev.player2, reaction: isBonus && pickerId === 'player2' ? 'answering' : 'idle'},
       }));
     },
-    [activeClue, currentRound, round1Board, round2Board, roundMaxClue, answeredClueIds, activeSelector, contestants, answerMode, aiConfig, player3Human]
+    [activeClue, currentRound, round1Board, round2Board, roundMaxClue, answeredClueIds, activeSelector, contestants, answerMode, aiConfig, player3Human, readAloud]
   );
 
   // Automatic AI Wager Announcement & Reveal for Daily Doubles
@@ -592,14 +649,14 @@ export function useGameController() {
       const pName = contestantsRef.current[pickerId]?.name || 'Opponent';
       commitClue({
         ...prev,
-        ...startCountdown(TIMES.dailyDouble, Date.now()),
+        ...dailyDoubleClock(prev.clue, Date.now()),
         bonusWagerLocked: true,
         feedbackText: `${pName} locked in wager at $${prev.bonusWagerInput.toLocaleString()}! Reading clue...`,
       });
     }, 1800);
 
     return () => clearTimeout(timer);
-  }, [deviceRole, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, activeClue?.bonusSelectingPlayerId, player3Human]);
+  }, [deviceRole, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, activeClue?.bonusSelectingPlayerId, player3Human, readAloud]);
 
   // Initialize and start match
   const startMatch = useCallback(() => {
@@ -610,6 +667,8 @@ export function useGameController() {
     setAiPickingTile(null);
     setAiThinkingStatus(null);
     setHighScoreCelebration(null);
+    setBigPlay(null);
+    if (readAloud) unlockSpeech();
 
     setContestants((prev) => ({
       coach: {
@@ -686,7 +745,7 @@ export function useGameController() {
     setIsInviteModalOpen(false);
     setIsLeaderboardOpen(false);
     setIsTagEditorOpen(false);
-  }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human]);
+  }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human, readAloud]);
 
   // Buzzer races. With friends on phones, buzzes are collected for a moment and the earliest
   // press wins, counting each phone's network delay, so the host's own phone has no head start.
@@ -710,12 +769,8 @@ export function useGameController() {
     // AI answers quickly; mic-only answers get a little longer, so a missed word can be said again.
     const seconds = isAI ? TIMES.aiAnswer : answerMode === 'VOICE' ? TIMES.voiceAnswer : TIMES.humanAnswer;
 
-    if (isAI) {
-      gameAudio.playHoverMicroTone();
-    } else {
-      gameAudio.playConfirmSelect();
-      if (contestantId === 'player' && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(60);
-    }
+    // Each seat's buzz-in sound plays from the effect that watches who buzzed (on the stream screen too).
+    if (contestantId === 'player' && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(60);
     if (contestantId === 'player') {
       setMatchStats((ms) => ({...ms, buzzerWins: ms.buzzerWins + 1}));
     }
@@ -791,6 +846,9 @@ export function useGameController() {
       }
       // Whoever answers correctly gets control of the board.
       setActiveSelector(who);
+      setBigPlay((b) =>
+        b && b.amount >= stake ? b : {who, amount: stake, dailyDouble: prev.isBonusWager, category: prev.clue.category}
+      );
     } else {
       gameAudio.playErrorBuzz();
     }
@@ -830,6 +888,13 @@ export function useGameController() {
     (msg: P2PMessage, fromPeerId: string) => {
       // 1. Host receives events from friends' phones
       if (deviceRole === 'HOST') {
+        if (msg.type === 'SCREEN_JOIN') {
+          if (screenPeersRef.current.has(fromPeerId)) return;
+          screenPeersRef.current.add(fromPeerId);
+          setScreenCount(screenPeersRef.current.size);
+          showToast('📺 Stream screen connected');
+          return;
+        }
         if (msg.type === 'CLIENT_JOIN') {
           let seats = remoteSeatsRef.current;
           if (seats[fromPeerId]) return;
@@ -916,7 +981,7 @@ export function useGameController() {
             gameAudio.playConfirmSelect();
             commitClue({
               ...prev,
-              ...startCountdown(TIMES.dailyDouble, Date.now()),
+              ...dailyDoubleClock(prev.clue, Date.now()),
               bonusWagerInput: wager,
               bonusWagerLocked: true,
               feedbackText: `${contestants[seat]?.name || seatLabel(seat)} locked wager at $${wager.toLocaleString()}! Provide answer.`,
@@ -945,8 +1010,8 @@ export function useGameController() {
         }
       }
 
-      // 2. Client receives state updates from Host
-      if (deviceRole === 'CLIENT') {
+      // 2. Phones and stream screens receive state updates from Host
+      if (deviceRole !== 'HOST') {
         if (msg.type === 'ROOM_FULL') {
           setP2PStatus('error');
           setP2PDetail('This room is full (3 players max).');
@@ -959,6 +1024,7 @@ export function useGameController() {
           if (s.seats) {
             const mine = s.seats[p2pRef.current?.peerId ?? ''];
             if (mine) setMySeat(mine);
+            setRemoteSeats(s.seats);
           }
           if (s.gameState) setGameState(s.gameState);
           if (s.currentRound) setCurrentRound(s.currentRound);
@@ -975,6 +1041,12 @@ export function useGameController() {
           if (s.finalTimer) setFinalTimer(countdownFromSync(s.finalTimer, Date.now()));
           if (s.finalLocks) setFinalLocks(s.finalLocks);
           if (s.finalOptions) setFinalOptions(s.finalOptions);
+          if (s.readAloud !== undefined) setReadAloudState(s.readAloud);
+          if (s.gameLength) setGameLength(s.gameLength);
+          if (s.lineup) setSyncedLineup(s.lineup);
+          if (s.bigPlay !== undefined) setBigPlay(s.bigPlay);
+          if (s.aiPickingTile !== undefined) setAiPickingTile(s.aiPickingTile);
+          if (s.aiThinkingStatus !== undefined) setAiThinkingStatus(s.aiThinkingStatus);
         }
       }
     },
@@ -994,6 +1066,8 @@ export function useGameController() {
     }
 
     const role = deviceRole === 'HOST' ? 'host' : 'client';
+    screenPeersRef.current = new Set();
+    setScreenCount(0);
     const name = playerNameRef.current;
     const mgr = new P2PConnectionManager(
       roomCode,
@@ -1011,6 +1085,11 @@ export function useGameController() {
           }
         },
         onPeerLeft: (peerId) => {
+          if (screenPeersRef.current.delete(peerId)) {
+            setScreenCount(screenPeersRef.current.size);
+            showToast('📺 Stream screen disconnected');
+            return;
+          }
           const seats = {...remoteSeatsRef.current};
           const seat = seats[peerId];
           if (!seat) return;
@@ -1024,6 +1103,8 @@ export function useGameController() {
             showToast(`${seatLabel(seat)} disconnected. They can rejoin with the same room code.`);
           } else {
             showToast(`${seatLabel(seat)} disconnected.`);
+            // A stream screen can keep the room open after the last friend leaves the lobby.
+            if (Object.keys(seats).length === 0) setIsClientConnected(false);
           }
           if (seat === 'analyst') {
             // Stats Riley (AI) takes the third seat back over.
@@ -1034,7 +1115,8 @@ export function useGameController() {
           }
         },
       },
-      name && name !== 'Champion' ? name : undefined
+      name && name !== 'Champion' ? name : undefined,
+      deviceRole === 'SCREEN' ? 'screen' : 'player'
     );
 
     p2pRef.current = mgr;
@@ -1062,9 +1144,11 @@ export function useGameController() {
         finalClue: finalClue && (finalShowdownPhase === 'RESULTS' ? finalClue : hideAnswer(finalClue)),
         finalOptions,
         seats: remoteSeats,
+        readAloud,
+        gameLength,
       },
     });
-  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats]);
+  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats, readAloud, gameLength, screenCount]);
 
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
@@ -1082,6 +1166,10 @@ export function useGameController() {
         finalShowdownPhase,
         finalTimer: countdownForSync(finalTimer, Date.now()),
         finalLocks,
+        lineup: activeContestantsList,
+        bigPlay,
+        aiPickingTile,
+        aiThinkingStatus,
       },
     });
   }, [
@@ -1096,6 +1184,11 @@ export function useGameController() {
     finalTimer,
     finalLocks,
     remoteSeats,
+    screenCount,
+    activeContestantsList,
+    bigPlay,
+    aiPickingTile,
+    aiThinkingStatus,
   ]);
 
   // AI Board Selection turn logic when it's Coach or Analyst's turn to pick
@@ -1240,6 +1333,7 @@ export function useGameController() {
     const now = Date.now();
     const current = activeClueRef.current;
     if (clocksPaused) {
+      stopSpeaking();
       if (current && current.endsAt !== null) {
         pausedClueIdRef.current = current.clue.id;
         commitClue(pauseCountdown(current, now));
@@ -1322,10 +1416,59 @@ export function useGameController() {
     return () => clearTimeout(timer);
   }, [deviceRole, activeClue?.phase, activeClue?.buzzedContestantId, activeClue?.isBonusWager, activeClue?.bonusWagerLocked, aiConfig, player3Human]);
 
+  // Each seat's own buzz-in sound, on the host and on a stream screen (phones just vibrate).
+  useEffect(() => {
+    if (deviceRole === 'CLIENT' || !activeClue || activeClue.phase !== 'ANSWERING' || activeClue.isBonusWager) return;
+    if (activeClue.buzzedContestantId) gameAudio.playBuzzIn(activeClue.buzzedContestantId);
+    // Only when someone new buzzes in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, activeClue?.clue.id, activeClue?.buzzedContestantId]);
+
+  // Reading aloud happens on one device: the stream screen if one is watching, otherwise the host.
+  const speaksHere =
+    readAloud && isSpeechSupported && (deviceRole === 'SCREEN' || (deviceRole === 'HOST' && screenCount === 0));
+
+  // Host: once the clue has been read, the buzzers light up a moment later instead of waiting
+  // out the estimated reading time.
+  const openBuzzersAfterReading = (clueId: string) => {
+    const prev = activeClueRef.current;
+    if (deviceRole !== 'HOST' || !prev || prev.clue.id !== clueId || prev.phase !== 'READING' || prev.endsAt === null) return;
+    const beat = 400;
+    if (prev.endsAt - Date.now() > beat) commitClue({...prev, ...startCountdown(beat / 1000, Date.now())});
+  };
+  const openBuzzersAfterReadingRef = useRef(openBuzzersAfterReading);
+  openBuzzersAfterReadingRef.current = openBuzzersAfterReading;
+
+  // Read the clue when it opens (a Daily Double once the wager is in), stop when someone buzzes,
+  // and say the answer when it is shown.
+  useEffect(() => {
+    if (!speaksHere || !activeClue) return;
+    const {clue, phase} = activeClue;
+    if (phase === 'READING') {
+      speak(spokenClue(clue), () => openBuzzersAfterReadingRef.current(clue.id));
+    } else if (phase === 'ANSWERING' && activeClue.isBonusWager) {
+      if (activeClue.bonusWagerLocked) speak(clue.clue);
+    } else if (phase === 'ANSWERING') {
+      stopSpeaking();
+    } else if (phase === 'REVEALED' && clue.correctAnswer) {
+      speak(`The answer: ${clue.correctAnswer}.`);
+    }
+    // Only when the clue moves to a new phase.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speaksHere, activeClue?.clue.id, activeClue?.phase, activeClue?.bonusWagerLocked]);
+
+  // The Final Showdown clue is read when it is revealed, and its answer at the results.
+  useEffect(() => {
+    if (!speaksHere || currentRound !== 'FINAL_SHOWDOWN' || !finalClue) return;
+    if (finalShowdownPhase === 'CLUE') speak(spokenFinal(finalClue));
+    else if (finalShowdownPhase === 'RESULTS' && finalClue.correctAnswer) speak(`The answer: ${finalClue.correctAnswer}.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speaksHere, currentRound, finalShowdownPhase, finalClue?.id, finalClue?.correctAnswer]);
+
   // Spacebar, Enter, number (1-8), and letter (A-H) shortcuts for buzzing and answering
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (document.activeElement?.tagName === 'INPUT') return;
+      if (deviceRole === 'SCREEN' || document.activeElement?.tagName === 'INPUT') return;
       if (!activeClue) return;
 
       // When answering in Multiple Choice (4-choice or 8-choice mode)
@@ -1417,7 +1560,15 @@ export function useGameController() {
       setPlayerFinalWager(maxFinalWager(contestants.player.score));
       setPlayer2FinalWager(maxFinalWager(contestants.player2.score));
       setPlayer3FinalWager(maxFinalWager(contestants.analyst.score));
-      setFinalLocks(NO_FINAL_LOCKS);
+      // Players with no money sit the Final out: their wager and answer count as locked from the start.
+      const sitters = (Object.keys(contestants) as ContestantId[]).filter((id) => !playsFinal(contestants[id].score));
+      setContestants((c) => {
+        const next = {...c};
+        for (const id of Object.keys(c) as ContestantId[]) next[id] = {...c[id], sitsOutFinal: sitters.includes(id)};
+        return next;
+      });
+      const locked = Object.fromEntries(sitters.map((id) => [id, true]));
+      setFinalLocks({wager: {...locked}, answer: {...locked}});
       setFinalOptions(finalClue ? generateOptions(finalClue, answerMode) : []);
     }
   }, [deviceRole, activeClue, currentRound, round1Board, round2Board, answeredClueIds, contestants, buzzerSeats, finalClue, answerMode, generateOptions]);
@@ -1455,21 +1606,26 @@ export function useGameController() {
       },
       analyst: {
         ...c.analyst,
-        wager: player3Human ? player3FinalWager : aiFinalWager(c.analyst.score, c.analyst.score === maxScore),
+        wager: c.analyst.sitsOutFinal
+          ? 0
+          : player3Human
+          ? player3FinalWager
+          : aiFinalWager(c.analyst.score, c.analyst.score === maxScore),
       },
       player: {
         ...c.player,
-        wager: playerFinalWager,
+        wager: c.player.sitsOutFinal ? 0 : playerFinalWager,
       },
       player2: {
         ...c.player2,
-        wager: player2Away ? 0 : player2FinalWager,
+        wager: player2Away || c.player2.sitsOutFinal ? 0 : player2FinalWager,
       },
     }));
 
     setFinalShowdownPhase('CLUE');
-    setFinalTimer(startCountdown(TIMES.final, Date.now()));
-  }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, player2Away, isTwoPlayerMode, isClientConnected]);
+    const reading = readAloud && finalClue ? readingSeconds(spokenFinal(finalClue), 0) : 0;
+    setFinalTimer(startCountdown(TIMES.final + reading, Date.now()));
+  }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, player2Away, isTwoPlayerMode, isClientConnected, readAloud, finalClue]);
 
   // Record every human player's result on this device's leaderboard. The celebration is for Player 1.
   const saveMatchToLeaderboard = useCallback(
@@ -1509,66 +1665,54 @@ export function useGameController() {
 
   // Final Showdown Resolution (Host)
   const finalizeFinalShowdown = useCallback(() => {
-    // Runs once: the submit button and the countdown can both get here.
-    if (!finalClue || finalShowdownPhase !== 'CLUE') return;
+    // Runs once: the submit button and the countdown can both get here. When nobody has money
+    // for the Final it ends straight from the wager screen.
+    const nobodyPlays = activeContestantsList.every((id) => contestants[id].sitsOutFinal);
+    if (!finalClue || !(finalShowdownPhase === 'CLUE' || (finalShowdownPhase === 'WAGER' && nobodyPlays))) return;
 
     const threshold = SETTINGS.fuzzyMatchThreshold;
     const isRight = (input: string) => isFinalAnswerRight(input, finalClue, finalOptions, threshold);
-    const playerCorrect = isRight(finalPlayerInput);
-    const player2Correct = (isTwoPlayerMode || isClientConnected) ? isRight(finalPlayer2Input) : false;
-
-    const coachCorrect = Math.random() < aiConfig.coachAcc;
-    const analystCorrect = player3Human ? isRight(finalPlayer3Input) : Math.random() < aiConfig.analystAcc;
     // A wrong AI answer is one of the choices everyone else saw.
     const wrongChoices = finalOptions.length
       ? finalOptions.filter((o) => o !== finalClue.correctAnswer)
       : finalClue.distractors;
+    const aiAnswer = (correct: boolean, pick: number) =>
+      correct ? finalClue.correctAnswer : wrongChoices[pick] || wrongChoices[0] || '(No Answer)';
 
-    const coachScoreDelta = coachCorrect ? contestants.coach.wager : -contestants.coach.wager;
-    const analystScoreDelta = analystCorrect ? contestants.analyst.wager : -contestants.analyst.wager;
-    const playerScoreDelta = playerCorrect ? contestants.player.wager : -contestants.player.wager;
-    const player2ScoreDelta = player2Correct ? contestants.player2.wager : -contestants.player2.wager;
+    const answers: Record<ContestantId, {correct: boolean; answer: string}> = {
+      player: {correct: isRight(finalPlayerInput), answer: finalPlayerInput || '(No Answer)'},
+      player2:
+        isTwoPlayerMode || isClientConnected
+          ? {correct: isRight(finalPlayer2Input), answer: finalPlayer2Input || '(No Answer)'}
+          : {correct: false, answer: '(No Answer)'},
+      analyst: player3Human
+        ? {correct: isRight(finalPlayer3Input), answer: finalPlayer3Input || '(No Answer)'}
+        : (() => {
+            const correct = Math.random() < aiConfig.analystAcc;
+            return {correct, answer: aiAnswer(correct, 1)};
+          })(),
+      coach: (() => {
+        const correct = Math.random() < aiConfig.coachAcc;
+        return {correct, answer: aiAnswer(correct, 0)};
+      })(),
+    };
 
-    const finalCoachScore = contestants.coach.score + coachScoreDelta;
-    const finalAnalystScore = contestants.analyst.score + analystScoreDelta;
-    const finalPlayerScore = contestants.player.score + playerScoreDelta;
-    const finalPlayer2Score = contestants.player2.score + player2ScoreDelta;
-
-    setContestants((c) => ({
-      ...c,
-      coach: {
-        ...c.coach,
-        score: finalCoachScore,
-        reaction: coachCorrect ? 'correct' : 'wrong',
-        finalCorrect: coachCorrect,
-        finalAnswer: coachCorrect ? finalClue.correctAnswer : wrongChoices[0] || '(No Answer)',
-      },
-      analyst: {
-        ...c.analyst,
-        score: finalAnalystScore,
-        reaction: analystCorrect ? 'correct' : 'wrong',
-        finalCorrect: analystCorrect,
-        finalAnswer: player3Human
-          ? finalPlayer3Input || '(No Answer)'
-          : analystCorrect
-          ? finalClue.correctAnswer
-          : wrongChoices[1] || wrongChoices[0] || '(No Answer)',
-      },
-      player: {
-        ...c.player,
-        score: finalPlayerScore,
-        reaction: playerCorrect ? 'correct' : 'wrong',
-        finalCorrect: playerCorrect,
-        finalAnswer: finalPlayerInput || '(No Answer)',
-      },
-      player2: {
-        ...c.player2,
-        score: finalPlayer2Score,
-        reaction: player2Correct ? 'correct' : 'wrong',
-        finalCorrect: player2Correct,
-        finalAnswer: finalPlayer2Input || '(No Answer)',
-      },
-    }));
+    // Players who sat out keep their score.
+    const finalScores = {} as Record<ContestantId, number>;
+    const after = {} as Record<ContestantId, Contestant>;
+    for (const id of Object.keys(contestants) as ContestantId[]) {
+      const c = contestants[id];
+      if (c.sitsOutFinal) {
+        finalScores[id] = c.score;
+        after[id] = {...c, reaction: 'idle', finalCorrect: undefined, finalAnswer: undefined};
+        continue;
+      }
+      const {correct, answer} = answers[id];
+      finalScores[id] = c.score + (correct ? c.wager : -c.wager);
+      after[id] = {...c, score: finalScores[id], reaction: correct ? 'correct' : 'wrong', finalCorrect: correct, finalAnswer: answer};
+    }
+    setContestants(after);
+    const {coach: finalCoachScore, analyst: finalAnalystScore, player: finalPlayerScore, player2: finalPlayer2Score} = finalScores;
 
     setFinalShowdownPhase('RESULTS');
 
@@ -1585,12 +1729,7 @@ export function useGameController() {
       (player3Human && finalAnalystScore === highestScore);
 
     // Save final match score to persistent Leaderboard
-    saveMatchToLeaderboard({
-      player: finalPlayerScore,
-      player2: finalPlayer2Score,
-      analyst: finalAnalystScore,
-      coach: finalCoachScore,
-    });
+    saveMatchToLeaderboard(finalScores);
 
     if (humanWon) {
       gameAudio.playVictoryFanfare();
@@ -1599,7 +1738,7 @@ export function useGameController() {
       gameAudio.playDefeatMotif();
       setGameState((prev) => ({...prev, status: 'GAME_OVER', score: finalPlayerScore}));
     }
-  }, [finalClue, finalOptions, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard]);
+  }, [finalClue, finalOptions, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard, activeContestantsList]);
 
   // With friends on phones, the Final waits until each player has locked in (or the clock runs out).
   const allRemoteWagersLocked = onlineRemoteSeats.every((seat) => finalLocks.wager[seat]);
@@ -1621,6 +1760,30 @@ export function useGameController() {
     const timeout = setTimeout(() => finalizeFinalShowdownRef.current(), Math.max(0, finalTimer.endsAt - Date.now()));
     return () => clearTimeout(timeout);
   }, [deviceRole, currentRound, finalShowdownPhase, clocksPaused, finalTimer.endsAt]);
+
+  // The end-of-game recap card, shared from any device once the match is over.
+  const recapMomentsList = useMemo(
+    () => recapMoments(activeContestantsList.map((id) => contestants[id]), bigPlay, finalClue?.correctAnswer),
+    [activeContestantsList, contestants, bigPlay, finalClue?.correctAnswer]
+  );
+  const shareRecap = useCallback(async () => {
+    const formats: Record<AnswerMode, string> = {STANDARD: '4-Choice', HARD: '8-Choice', EXPERT: 'Typed', VOICE: 'Mic Only'};
+    const vsAI = activeContestantsList.includes('coach') ? ' · vs. AI' : '';
+    const level = difficulty.charAt(0) + difficulty.slice(1).toLowerCase();
+    try {
+      const canvas = drawRecapCard({
+        standings: activeContestantsList.map((id) => contestants[id]).sort((a, b) => b.score - a.score),
+        moments: recapMomentsList,
+        mode: `${gameLength === 'SHORT' ? 'Short' : 'Full'} Game · ${formats[answerMode]} · ${level}${vsAI}`,
+        date: new Date(),
+        url: `${window.location.origin}${window.location.pathname}`,
+      });
+      const result = await shareRecapCard(canvas);
+      if (result === 'saved') showToast('✓ Recap card saved to your downloads');
+    } catch {
+      showToast('Could not make the recap card on this device.');
+    }
+  }, [activeContestantsList, contestants, recapMomentsList, difficulty, gameLength, answerMode, showToast]);
 
   // Copy Room Link to Clipboard
   const handleCopyInviteLink = useCallback(() => {
@@ -1646,14 +1809,6 @@ export function useGameController() {
         showToast(`Room Code: ${roomCode}`);
       });
   }, [roomCode, showToast]);
-
-  // Active contestants list for display
-  const activeContestantsList = useMemo(() => {
-    if (isTwoPlayerMode || isClientConnected) {
-      return ['player', 'player2', 'analyst'] as ContestantId[];
-    }
-    return ['coach', 'player', 'analyst'] as ContestantId[];
-  }, [isTwoPlayerMode, isClientConnected]);
 
   // Determine current active BGM
   const activeBgmUrl = useMemo(() => {
@@ -1797,6 +1952,14 @@ export function useGameController() {
     finalAnswerByVoice,
     selectClue,
     startMatch,
+    dailyDoubleClock,
+    readAloud,
+    setReadAloud,
+    screenCount,
+    streamScreenUrl,
+    bigPlay,
+    recapMomentsList,
+    shareRecap,
     handleContestantBuzz,
     handleContestantSubmitAnswer,
     confirmFinalWagers,

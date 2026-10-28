@@ -47,6 +47,8 @@ try {
       await tap('button:has-text("SUBMIT FINAL ANSWER")', 'final submit');
       continue;
     }
+    // Players at $0 or below sit the Final out, so the host may just end it.
+    if (await tap('button:has-text("SHOW RESULTS"), button:has-text("SEE FINAL RESULTS")', 'final submit')) continue;
     if (await tap(choice, 'answer')) continue;
     if (body.includes('Your turn! Select any clue tile.') && (await tap('button:has-text("$"):not([disabled])', 'pick tile'))) continue;
     await page.waitForTimeout(250);

@@ -3,7 +3,7 @@ import {Zap, Clock, DollarSign, Star} from 'lucide-react';
 import {gameAudio} from '../utils/helper';
 import TimeLeft from '../utils/TimeLeft';
 import {isOpenAnswerMode} from '../game/types';
-import {maxDailyDoubleWager, startCountdown, TIMES} from '../game/rules';
+import {maxDailyDoubleWager} from '../game/rules';
 import VoiceAnswerButton, {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {useGame} from '../game/GameContext';
 
@@ -21,6 +21,7 @@ export default function ClueCard() {
     handleContestantBuzz,
     handleContestantSubmitAnswer,
     activeContestantsList,
+    dailyDoubleClock,
   } = useGame();
   return (
     <>
@@ -181,7 +182,7 @@ export default function ClueCard() {
                           prev
                             ? {
                                 ...prev,
-                                ...startCountdown(TIMES.dailyDouble, Date.now()),
+                                ...dailyDoubleClock(prev.clue, Date.now()),
                                 bonusWagerLocked: true,
                                 feedbackText: `Wager locked at $${prev.bonusWagerInput.toLocaleString()}! Provide your answer.`,
                               }
