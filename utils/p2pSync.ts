@@ -7,7 +7,7 @@ import Peer, {DataConnection} from 'peerjs';
 
 export type P2PMessage =
   | { type: 'STATE_SYNC'; payload: any }
-  | { type: 'CLIENT_JOIN'; playerName?: string }
+  | { type: 'CLIENT_JOIN'; playerName?: string; deviceId?: string }
   | { type: 'SCREEN_JOIN' } // a big-screen stream view that only watches
   | { type: 'CLIENT_BUZZ'; contestantId: string; timestamp: number }
   | { type: 'CLIENT_ANSWER'; contestantId: string; answer: string; alternatives?: string[] }
@@ -63,6 +63,23 @@ export class P2PConnectionManager {
   // When each peer was last heard from. A phone that locks its screen can vanish without
   // closing its connection, so the host drops peers that go quiet.
   private lastHeard = new Map<string, number>();
+
+  /**
+   * A random id for this browser tab. It survives a reload, so the host can tell a phone
+   * coming back from a different phone that happens to use the same name.
+   */
+  public static deviceId(): string {
+    const key = 'sportsarena_device_id';
+    try {
+      const saved = sessionStorage.getItem(key);
+      if (saved) return saved;
+      const id = Math.random().toString(36).slice(2, 12);
+      sessionStorage.setItem(key, id);
+      return id;
+    } catch {
+      return Math.random().toString(36).slice(2, 12);
+    }
+  }
 
   constructor(
     roomCode: string,
@@ -168,7 +185,7 @@ export class P2PConnectionManager {
     conn.on('open', () => {
       this.setupDataConnection(conn);
       this.callbacks.onStatus('connected', 'Connected to the host!');
-      this.send(this.joinAs === 'screen' ? { type: 'SCREEN_JOIN' } : { type: 'CLIENT_JOIN', playerName: this.playerName });
+      this.send(this.joinAs === 'screen' ? { type: 'SCREEN_JOIN' } : { type: 'CLIENT_JOIN', playerName: this.playerName, deviceId: P2PConnectionManager.deviceId() });
     });
 
     conn.on('error', (err: any) => {
