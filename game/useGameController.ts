@@ -336,6 +336,8 @@ export function useGameController() {
   // into the same seat and score. Stats Riley covers an away Player 3; an away Player 2 sits out.
   const [awaySeats, setAwaySeats] = useState<Partial<Record<RemoteSeat, string>>>({});
   const awaySeatsRef = useRef(awaySeats);
+  // Host: which phone (by its device id) last sat in each seat.
+  const seatDevicesRef = useRef<Partial<Record<RemoteSeat, string>>>({});
   const player2Away = awaySeats.player2 !== undefined;
 
   // Seats that take part in buzzer races right now.
@@ -913,9 +915,11 @@ export function useGameController() {
           let seats = remoteSeatsRef.current;
           if (seats[fromPeerId]) return;
           // A phone that reloaded comes back before its old connection is noticed as gone:
-          // same name as a seated player means it replaces that connection.
+          // the same device id as a seated phone means it replaces that connection. Names
+          // aren't enough here, since two friends can easily share the default name.
+          const seatDevices = seatDevicesRef.current;
           const stalePeer = Object.keys(seats).find(
-            (peerId) => msg.playerName && contestantsRef.current[seats[peerId]].name === msg.playerName
+            (peerId) => msg.deviceId && seatDevices[seats[peerId]] === msg.deviceId
           );
           if (stalePeer) {
             const staleSeat = seats[stalePeer];
@@ -929,9 +933,10 @@ export function useGameController() {
           const taken = new Set(Object.values(seats));
           const away = awaySeatsRef.current;
           const awayList = (Object.keys(away) as RemoteSeat[]).filter((s) => !taken.has(s));
-          // A dropped friend gets their own seat back (matched by name), a new friend gets an
-          // empty seat, and an unnamed phone fills an away seat when nothing else is left.
+          // A dropped friend gets their own seat back (matched by device, then by name), a new
+          // friend gets an empty seat, and an unnamed phone fills an away seat when nothing else is left.
           const seat =
+            awayList.find((s) => msg.deviceId && seatDevices[s] === msg.deviceId) ||
             awayList.find((s) => msg.playerName && away[s] === msg.playerName) ||
             REMOTE_SEATS.find((s) => !taken.has(s) && away[s] === undefined) ||
             awayList[0];
@@ -943,12 +948,18 @@ export function useGameController() {
           }
           const next = {...seats, [fromPeerId]: seat};
           remoteSeatsRef.current = next;
+          if (msg.deviceId) seatDevicesRef.current = {...seatDevices, [seat]: msg.deviceId};
           setRemoteSeats(next);
           setIsClientConnected(true);
           setIsTwoPlayerMode(true);
           const label = seatLabel(seat);
           const rejoined = away[seat] !== undefined;
-          const name = msg.playerName || away[seat] || `Friend (${label})`;
+          const wanted = msg.playerName || away[seat] || `Friend (${label})`;
+          // Two phones with the same name get their seat added, so the scoreboard tells them apart.
+          const nameTaken = (Object.keys(contestantsRef.current) as (keyof typeof contestantsRef.current)[]).some(
+            (id) => id !== seat && contestantsRef.current[id].name === wanted
+          );
+          const name = nameTaken && !rejoined ? `${wanted} ${label.slice(1)}` : wanted;
           if (rejoined) {
             const nextAway = {...away};
             delete nextAway[seat];
