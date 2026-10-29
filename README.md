@@ -31,7 +31,7 @@ Daily Double) to play a short game while testing.
 
 ## Questions
 
-`public/questions/nfl.json` holds about 3,300 NFL questions generated from
+`public/questions/nfl.json` holds about 4,000 NFL questions, written as Jeopardy-style clues, generated from
 [nflverse](https://github.com/nflverse) data (CC BY 4.0). Rebuild it with:
 
 ```sh
