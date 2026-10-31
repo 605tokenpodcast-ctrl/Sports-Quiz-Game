@@ -100,12 +100,13 @@ export function aiFinalWager(score: number, isLeader: boolean, random = Math.ran
 // --- Reading clues aloud ---------------------------------------------------------------
 
 /**
- * About how long the browser's voice takes to read `text`, in seconds, at a little faster
- * than normal speech. The buzzers open after this when clues are read aloud.
+ * About how long the browser's voice takes to read `text` at speech rate `rate`, in seconds.
+ * The buzzers open after this when clues are read aloud (or sooner, the moment the reading
+ * actually ends), so it errs on the long side.
  */
-export function readingSeconds(text: string, minimum: number): number {
+export function readingSeconds(text: string, minimum: number, rate = 1.2): number {
   const words = text.trim().split(/\s+/).filter(Boolean).length;
-  return Math.min(15, Math.max(minimum, Math.round((words / 2.8 + 0.8) * 10) / 10));
+  return Math.min(20, Math.max(minimum, Math.round((words / (2.5 * rate) + 1) * 10) / 10));
 }
 
 // --- Answers ----------------------------------------------------------------------------

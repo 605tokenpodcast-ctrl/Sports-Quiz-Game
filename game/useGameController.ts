@@ -19,7 +19,19 @@ import {
   TriviaCategory,
 } from '../triviaData';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
-import {isSpeechSupported, speak, spokenMoney, stopSpeaking, unlockSpeech} from '../utils/speech';
+import {
+  answerLine,
+  getVoiceSpeed,
+  isSpeechSupported,
+  setVoiceSpeed as setSpeechSpeed,
+  speak,
+  speechRate,
+  SpeechPart,
+  spokenMoney,
+  stopSpeaking,
+  unlockSpeech,
+  VoiceSpeed,
+} from '../utils/speech';
 import {drawRecapCard, shareRecapCard} from '../utils/recapCard';
 import {recapAwards, recapMoments} from './recap';
 import {
@@ -80,8 +92,16 @@ import {
 import {BGM_TRIVIA, BGM_FINAL} from '../ui/shared';
 
 // What is read aloud when a clue opens.
-const spokenClue = (clue: QuestionClue) => `${clue.category}, for ${spokenMoney(clue.value)}. ${clue.clue}`;
-const spokenFinal = (clue: QuestionClue) => `The Final Showdown. ${clue.category}. ${clue.clue}`;
+// The intro is read with a little more energy than the clue itself.
+const spokenClue = (clue: QuestionClue): SpeechPart[] => [
+  {text: `${clue.category}, for ${spokenMoney(clue.value)}!`, hype: true},
+  clue.clue,
+];
+const spokenFinal = (clue: QuestionClue): SpeechPart[] => [
+  {text: `Final Showdown! The category: ${clue.category}.`, hype: true},
+  clue.clue,
+];
+const partsText = (parts: SpeechPart[]) => parts.map((p) => (typeof p === 'string' ? p : p.text)).join(' ');
 
 export function useGameController() {
   // Audio mute controls: Music MUST be OFF by default, SFX MUST be ON by default
@@ -170,6 +190,13 @@ export function useGameController() {
     } catch {
       // Private browsing: the setting just isn't remembered.
     }
+  }, []);
+
+  // How fast the host voice reads. Set on the host, and passed to the stream screen.
+  const [voiceSpeed, setVoiceSpeedState] = useState<VoiceSpeed>(() => getVoiceSpeed());
+  const setVoiceSpeed = useCallback((s: VoiceSpeed) => {
+    setSpeechSpeed(s);
+    setVoiceSpeedState(s);
   }, []);
 
   // Core Game State
@@ -533,7 +560,7 @@ export function useGameController() {
   // A Daily Double's answer clock, which starts once the wager is in. Read aloud, it also
   // gets the time it takes to read the clue.
   const dailyDoubleClock = (clue: QuestionClue, now: number) =>
-    startCountdown(TIMES.dailyDouble + (readAloud ? readingSeconds(clue.clue, 0) : 0), now);
+    startCountdown(TIMES.dailyDouble + (readAloud ? readingSeconds(clue.clue, 0, speechRate()) : 0), now);
 
   // Helper to shuffle distractors and construct options array with guaranteed 8-choice / 4-choice integrity
   const generateOptions = useCallback((clue: QuestionClue, mode: AnswerMode): string[] => {
@@ -604,7 +631,7 @@ export function useGameController() {
         ...(isBonus
           ? frozenCountdown(TIMES.dailyDouble)
           : startCountdown(
-              readAloud ? readingSeconds(spokenClue(clue), SETTINGS.buzzerLightDelay) : SETTINGS.buzzerLightDelay,
+              readAloud ? readingSeconds(partsText(spokenClue(clue)), SETTINGS.buzzerLightDelay, speechRate()) : SETTINGS.buzzerLightDelay,
               Date.now()
             )),
         options,
@@ -1067,6 +1094,10 @@ export function useGameController() {
           if (s.finalLocks) setFinalLocks(s.finalLocks);
           if (s.finalOptions) setFinalOptions(s.finalOptions);
           if (s.readAloud !== undefined) setReadAloudState(s.readAloud);
+          if (s.voiceSpeed) {
+            setSpeechSpeed(s.voiceSpeed, false);
+            setVoiceSpeedState(s.voiceSpeed);
+          }
           if (s.gameLength) setGameLength(s.gameLength);
           if (s.lineup) setSyncedLineup(s.lineup);
           if (s.bigPlay !== undefined) setBigPlay(s.bigPlay);
@@ -1170,10 +1201,11 @@ export function useGameController() {
         finalOptions,
         seats: remoteSeats,
         readAloud,
+        voiceSpeed,
         gameLength,
       },
     });
-  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats, readAloud, gameLength, screenCount]);
+  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats, readAloud, voiceSpeed, gameLength, screenCount]);
 
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
@@ -1458,7 +1490,7 @@ export function useGameController() {
   const openBuzzersAfterReading = (clueId: string) => {
     const prev = activeClueRef.current;
     if (deviceRole !== 'HOST' || !prev || prev.clue.id !== clueId || prev.phase !== 'READING' || prev.endsAt === null) return;
-    const beat = 400;
+    const beat = 250;
     if (prev.endsAt - Date.now() > beat) commitClue({...prev, ...startCountdown(beat / 1000, Date.now())});
   };
   const openBuzzersAfterReadingRef = useRef(openBuzzersAfterReading);
@@ -1472,11 +1504,11 @@ export function useGameController() {
     if (phase === 'READING') {
       speak(spokenClue(clue), () => openBuzzersAfterReadingRef.current(clue.id));
     } else if (phase === 'ANSWERING' && activeClue.isBonusWager) {
-      if (activeClue.bonusWagerLocked) speak(clue.clue);
+      if (activeClue.bonusWagerLocked) speak([{text: 'Here is your Daily Double.', hype: true}, clue.clue]);
     } else if (phase === 'ANSWERING') {
       stopSpeaking();
     } else if (phase === 'REVEALED' && clue.correctAnswer) {
-      speak(`The answer: ${clue.correctAnswer}.`);
+      speak({text: answerLine(clue.correctAnswer), hype: true});
     }
     // Only when the clue moves to a new phase.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1486,7 +1518,7 @@ export function useGameController() {
   useEffect(() => {
     if (!speaksHere || currentRound !== 'FINAL_SHOWDOWN' || !finalClue) return;
     if (finalShowdownPhase === 'CLUE') speak(spokenFinal(finalClue));
-    else if (finalShowdownPhase === 'RESULTS' && finalClue.correctAnswer) speak(`The answer: ${finalClue.correctAnswer}.`);
+    else if (finalShowdownPhase === 'RESULTS' && finalClue.correctAnswer) speak({text: answerLine(finalClue.correctAnswer), hype: true});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speaksHere, currentRound, finalShowdownPhase, finalClue?.id, finalClue?.correctAnswer]);
 
@@ -1648,7 +1680,7 @@ export function useGameController() {
     }));
 
     setFinalShowdownPhase('CLUE');
-    const reading = readAloud && finalClue ? readingSeconds(spokenFinal(finalClue), 0) : 0;
+    const reading = readAloud && finalClue ? readingSeconds(partsText(spokenFinal(finalClue)), 0, speechRate()) : 0;
     setFinalTimer(startCountdown(TIMES.final + reading, Date.now()));
   }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, player2Away, isTwoPlayerMode, isClientConnected, readAloud, finalClue]);
 
@@ -1985,6 +2017,8 @@ export function useGameController() {
     dailyDoubleClock,
     readAloud,
     setReadAloud,
+    voiceSpeed,
+    setVoiceSpeed,
     screenCount,
     streamScreenUrl,
     greenScreenUrl,

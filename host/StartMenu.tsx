@@ -5,6 +5,7 @@ import {AIDifficulty, AnswerMode, RemoteSeat, seatLabel} from '../game/types';
 import {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {isSpeechSupported} from '../utils/speech';
 import {useGame} from '../game/GameContext';
+import VoiceSettings from './VoiceSettings';
 
 export default function StartMenu() {
   const {
@@ -35,6 +36,8 @@ export default function StartMenu() {
     openLeaderboardWithConfig,
     readAloud,
     setReadAloud,
+    voiceSpeed,
+    setVoiceSpeed,
     screenCount,
   } = useGame();
   return (
@@ -238,6 +241,11 @@ export default function StartMenu() {
                   </span>
                 </span>
               </button>
+            )}
+            {isSpeechSupported && readAloud && (
+              <div className="w-full -mt-2 mb-4 p-2.5 rounded-lg border border-blue-900 bg-slate-950/70">
+                <VoiceSettings voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} speaksElsewhere={screenCount > 0} />
+              </div>
             )}
 
             {/* Start Button */}

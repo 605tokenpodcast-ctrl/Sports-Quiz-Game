@@ -3,6 +3,7 @@ import {Play, RotateCw, Volume2, VolumeX, Trophy, Shield, RefreshCw, Edit3, Mega
 import {gameAudio, MenuOverlay} from '../utils/helper';
 import {useGame} from '../game/GameContext';
 import {isSpeechSupported} from '../utils/speech';
+import VoiceSettings from './VoiceSettings';
 
 export default function GameMenu() {
   const {
@@ -22,6 +23,9 @@ export default function GameMenu() {
     openLeaderboardWithConfig,
     readAloud,
     setReadAloud,
+    voiceSpeed,
+    setVoiceSpeed,
+    screenCount,
   } = useGame();
   return (
     <>
@@ -95,6 +99,11 @@ export default function GameMenu() {
                   <Megaphone className={`w-4 h-4 ${readAloud ? 'text-emerald-400' : 'text-rose-400'}`} />
                   <span>Read Clues Aloud: {readAloud ? 'On' : 'Off'}</span>
                 </button>
+              )}
+              {isSpeechSupported && readAloud && (
+                <div className="w-full p-2.5 rounded-xl bg-slate-950/70 border border-slate-700">
+                  <VoiceSettings voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} speaksElsewhere={screenCount > 0} />
+                </div>
               )}
 
               {/* Leaderboards Trigger */}
