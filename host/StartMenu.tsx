@@ -38,6 +38,10 @@ export default function StartMenu() {
     setReadAloud,
     voiceSpeed,
     setVoiceSpeed,
+    voiceEngine,
+    setVoiceEngine,
+    aiVoice,
+    setAiVoice,
     screenCount,
   } = useGame();
   return (
@@ -244,7 +248,15 @@ export default function StartMenu() {
             )}
             {isSpeechSupported && readAloud && (
               <div className="w-full -mt-2 mb-4 p-2.5 rounded-lg border border-blue-900 bg-slate-950/70">
-                <VoiceSettings voiceSpeed={voiceSpeed} setVoiceSpeed={setVoiceSpeed} speaksElsewhere={screenCount > 0} />
+                <VoiceSettings
+                  voiceSpeed={voiceSpeed}
+                  setVoiceSpeed={setVoiceSpeed}
+                  voiceEngine={voiceEngine}
+                  setVoiceEngine={setVoiceEngine}
+                  aiVoice={aiVoice}
+                  setAiVoice={setAiVoice}
+                  speaksElsewhere={screenCount > 0}
+                />
               </div>
             )}
 
