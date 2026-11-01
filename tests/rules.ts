@@ -156,7 +156,8 @@ check('reading a clue aloud holds the buzzers until it is read', () => {
   const clue = 'Who had the most receiving yards of any player in Week 6 of the 2026 season (165)?';
   const secs = readingSeconds(clue, 3.6);
   assert.ok(secs > 5 && secs < 8, `about 6 seconds for a 17-word clue, got ${secs}`);
-  assert.equal(readingSeconds('word '.repeat(200), 3.6), 15);
+  assert.ok(readingSeconds(clue, 3.6, 1.0) > readingSeconds(clue, 3.6, 1.4), 'a faster voice opens the buzzers sooner');
+  assert.equal(readingSeconds('word '.repeat(200), 3.6), 20);
 });
 
 const person = (id: ContestantId, name: string, extra: Partial<Contestant> = {}): Contestant => ({
