@@ -60,6 +60,21 @@ async function main() {
   assert.deepEqual(after, ['play 4'], 'only the new line plays after the cut-off');
   assert.equal(done, 2, 'only the new line counts as finished');
 
+  // A device too slow to have the first sentence ready in time hands over to the device voice.
+  setAiModelForTests({generate: () => new Promise(() => {})});
+  let slow = 0;
+  let finished = 0;
+  speakAi([{text: 'Stuck.', speed: 1}], 'af_heart', () => finished++, () => slow++, 20);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(slow, 1, 'falls back when the first sentence is late');
+  assert.equal(finished, 0);
+
+  // A failed sentence also hands over instead of leaving the buzzers waiting.
+  setAiModelForTests({generate: () => Promise.reject(new Error('boom'))});
+  speakAi([{text: 'Broken.', speed: 1}], 'af_heart', () => finished++, () => slow++, 1000);
+  await tick();
+  assert.equal(slow, 2, 'falls back when generating fails');
+
   stopAi();
   console.log('ok   AI voice plays sentences in order, prefetches, and cuts off cleanly');
 }

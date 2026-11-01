@@ -1,7 +1,7 @@
 // Voice and speed for reading clues aloud, with a button to hear it.
 import {useEffect, useState} from 'react';
 import {Play} from 'lucide-react';
-import {AI_VOICES, aiState, AiState, loadAiVoice, onAiState} from '../utils/aiVoice';
+import {AI_VOICES} from '../utils/aiVoice';
 import {
   currentVoiceName,
   getChosenVoice,
@@ -46,25 +46,16 @@ export default function VoiceSettings({
   const [voices, setVoices] = useState(() => rankedVoices());
   const [chosen, setChosen] = useState(() => getChosenVoice());
   useEffect(() => onVoicesChanged(() => setVoices(rankedVoices())), []);
-  const [ai, setAi] = useState<AiState>(() => aiState());
-  useEffect(() => onAiState(setAi), []);
   const useAi = voiceEngine === 'ai';
-  // Download on the device that reads; the stream screen downloads its own copy.
-  useEffect(() => {
-    if (useAi && !speaksElsewhere) loadAiVoice();
-  }, [useAi, speaksElsewhere]);
 
   const test = () => {
     unlockSpeech();
     speak(sampleLine());
   };
+  // The AI voice only runs on a stream screen. Phones keep their own voice so the game stays quick.
   const aiStatus = speaksElsewhere
-    ? 'The stream screen downloads the AI voice (about 90 MB, once) and reads with it.'
-    : ai.status === 'ready'
-      ? 'AI voice ready.'
-      : ai.status === 'error'
-        ? 'The AI voice could not load here, so the device voice reads instead.'
-        : `Downloading the AI voice${ai.progress ? ` (${ai.progress}%)` : ''}, about 90 MB, only once. The device voice reads until it's ready.`;
+    ? 'The stream screen reads with the AI voice (downloads about 90 MB once). If it is too slow there, it switches to its own voice by itself.'
+    : 'The AI voice only runs on a stream screen (a laptop works best). Until one is connected, this device reads with its own voice.';
   const autoName = voices[0] ? shortName(voices[0].name) : '';
 
   return (
@@ -89,7 +80,7 @@ export default function VoiceSettings({
         <div className="flex-1 grid grid-cols-2 gap-1">
           {(
             [
-              ['ai', 'AI voice'],
+              ['ai', 'AI voice (stream screen)'],
               ['device', 'Device voice'],
             ] as const
           ).map(([id, label]) => (
