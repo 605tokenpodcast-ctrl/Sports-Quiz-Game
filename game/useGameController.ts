@@ -1083,7 +1083,9 @@ export function useGameController() {
       if (deviceRole !== 'HOST') {
         if (msg.type === 'ROOM_FULL') {
           setP2PStatus('error');
-          setP2PDetail('This room is full (3 players max).');
+          setP2PDetail(
+            'This room already has 3 players: the host device is Player 1 and two phones are P2 and P3. To play on this phone, open the game link (without scanning) and host from here instead.'
+          );
           showToast('This room is full (3 players max).');
           p2pRef.current?.destroy();
           return;
