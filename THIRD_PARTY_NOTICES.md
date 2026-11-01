@@ -18,9 +18,6 @@ and are distributed subject to the license terms reproduced below.
 :                             :         :         : Poimandres                 :
 | framer-motion               | 12.42.0 | MIT     | Copyright (c) 2018 Framer  |
 :                             :         :         : B.V.                       :
-| kokoro-js                   | 1.2.1   | Apache-2.0 | Copyright (c) Xenova    |
-:                             :         :         : (model: Kokoro-82M by      :
-:                             :         :         : hexgrad, Apache-2.0)       :
 | lucide-react                | 1.21.0  | ISC     | Copyright (c) 2024 Lucide  |
 :                             :         :         : Icons and Contributors     :
 | phaser                      | 4.2.0   | MIT     | Copyright (c) 2024 Richard |

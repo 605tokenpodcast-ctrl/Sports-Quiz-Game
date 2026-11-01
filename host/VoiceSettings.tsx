@@ -1,7 +1,6 @@
 // Voice and speed for reading clues aloud, with a button to hear it.
 import {useEffect, useState} from 'react';
 import {Play} from 'lucide-react';
-import {AI_VOICES} from '../utils/aiVoice';
 import {
   currentVoiceName,
   getChosenVoice,
@@ -12,7 +11,6 @@ import {
   speak,
   unlockSpeech,
   VOICE_SPEEDS,
-  VoiceEngine,
   VoiceSpeed,
 } from '../utils/speech';
 
@@ -28,34 +26,21 @@ const shortName = (name: string) =>
 export default function VoiceSettings({
   voiceSpeed,
   setVoiceSpeed,
-  voiceEngine,
-  setVoiceEngine,
-  aiVoice,
-  setAiVoice,
   speaksElsewhere,
 }: {
   voiceSpeed: VoiceSpeed;
   setVoiceSpeed: (s: VoiceSpeed) => void;
-  voiceEngine: VoiceEngine;
-  setVoiceEngine: (e: VoiceEngine) => void;
-  aiVoice: string;
-  setAiVoice: (v: string) => void;
   /** The stream screen reads the clues, so the voice picked here isn't the one heard. */
   speaksElsewhere: boolean;
 }) {
   const [voices, setVoices] = useState(() => rankedVoices());
   const [chosen, setChosen] = useState(() => getChosenVoice());
   useEffect(() => onVoicesChanged(() => setVoices(rankedVoices())), []);
-  const useAi = voiceEngine === 'ai';
 
   const test = () => {
     unlockSpeech();
     speak(sampleLine());
   };
-  // The AI voice only runs on a stream screen. Phones keep their own voice so the game stays quick.
-  const aiStatus = speaksElsewhere
-    ? 'The stream screen reads with the AI voice (downloads about 90 MB once). If it is too slow there, it switches to its own voice by itself.'
-    : 'The AI voice only runs on a stream screen (a laptop works best). Until one is connected, this device reads with its own voice.';
   const autoName = voices[0] ? shortName(voices[0].name) : '';
 
   return (
@@ -75,48 +60,7 @@ export default function VoiceSettings({
           ))}
         </div>
       </div>
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-bold uppercase text-slate-400 w-12 shrink-0">Reader</span>
-        <div className="flex-1 grid grid-cols-2 gap-1">
-          {(
-            [
-              ['ai', 'AI voice (stream screen)'],
-              ['device', 'Device voice'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              onClick={() => setVoiceEngine(id)}
-              className={`min-h-[36px] rounded-lg border text-xs font-bold transition-colors ${
-                voiceEngine === id ? 'bg-blue-600 text-white border-blue-400' : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-blue-500'
-              }`}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      {useAi && (
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold uppercase text-slate-400 w-12 shrink-0">Voice</span>
-          <select
-            value={aiVoice}
-            onChange={(e) => setAiVoice(e.target.value)}
-            className="flex-1 min-w-0 min-h-[36px] rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-200 px-2">
-            {AI_VOICES.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.label}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={test}
-            title="Hear this voice"
-            className="min-w-[36px] min-h-[36px] rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center">
-            <Play className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-      {!useAi && voices.length > 0 && (
+      {voices.length > 0 && (
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold uppercase text-slate-400 w-12 shrink-0">Voice</span>
           <select
@@ -143,9 +87,7 @@ export default function VoiceSettings({
         </div>
       )}
       <span className="text-[9px] text-slate-400">
-        {useAi
-          ? aiStatus
-          : speaksElsewhere
+        {speaksElsewhere
           ? 'The stream screen reads with its own best voice at this speed.'
           : `Reading with ${shortName(currentVoiceName() ?? '') || 'this device’s voice'}. Sounds robotic? Edge and iPhone/Mac Enhanced voices sound most natural.`}
       </span>

@@ -6,8 +6,6 @@
 // neural voices, Apple's Premium/Enhanced voices, then Google's. Players can also pick a
 // voice and a speed themselves (remembered on that device).
 
-import {aiState, DEFAULT_AI_VOICE, giveUpOnAi, isAiVoice, loadAiVoice, speakAi, stopAi, unlockAiAudio} from './aiVoice';
-
 export const isSpeechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
 // --- Voices -----------------------------------------------------------------------------
@@ -121,41 +119,6 @@ export function setVoiceSpeed(s: VoiceSpeed, remember = true) {
 }
 export const speechRate = () => VOICE_SPEEDS.find((x) => x.id === speed)!.rate;
 
-// --- Engine: the device's voice, or the AI voice ------------------------------------------
-
-export type VoiceEngine = 'device' | 'ai';
-const ENGINE_KEY = 'tts_engine';
-const AI_VOICE_KEY = 'tts_ai_voice';
-// The device voice by default. The AI voice is opt-in, and only ever runs on a stream screen.
-let engine: VoiceEngine = readStored(ENGINE_KEY) === 'ai' ? 'ai' : 'device';
-// Phones never run the AI voice: it's too heavy to share a phone with the game.
-let aiAllowed = false;
-export function setAiAllowed(on: boolean) {
-  aiAllowed = on;
-}
-const useAi = () => engine === 'ai' && aiAllowed;
-let slowLines = 0;
-let aiVoice: string = (() => {
-  const v = readStored(AI_VOICE_KEY);
-  return isAiVoice(v) ? v : DEFAULT_AI_VOICE;
-})();
-export const getVoiceEngine = () => engine;
-export const getAiVoice = () => aiVoice;
-/** `remember` is false when the host's choice is applied on the stream screen. */
-export function setVoiceEngine(e: VoiceEngine, remember = true) {
-  engine = e === 'ai' ? 'ai' : 'device';
-  if (remember) writeStored(ENGINE_KEY, engine);
-}
-export function setAiVoice(v: string, remember = true) {
-  if (!isAiVoice(v)) return;
-  aiVoice = v;
-  if (remember) writeStored(AI_VOICE_KEY, v);
-}
-/** Call on the device that reads aloud, so the AI voice is ready by the first clue. */
-export function prepareVoice() {
-  if (useAi()) loadAiVoice();
-}
-
 // --- Speaking ---------------------------------------------------------------------------
 
 /**
@@ -183,37 +146,83 @@ export function splitSentences(text: string): string[] {
   return out;
 }
 
+// --- Reading the text the way a host would --------------------------------------------
+
+const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
+  'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+/** 0-99 in words: 24 -> "twenty-four". */
+function smallNumber(n: number): string {
+  if (n < 20) return ONES[n];
+  return TENS[Math.floor(n / 10)] + (n % 10 ? `-${ONES[n % 10]}` : '');
+}
+
+/** A year the way people say it: 1998 -> "nineteen ninety-eight", 2005 -> "two thousand five". */
+export function spokenYear(year: number): string {
+  const hi = Math.floor(year / 100);
+  const lo = year % 100;
+  if (year >= 2000 && year < 2010) return year === 2000 ? 'two thousand' : `two thousand ${ONES[lo]}`;
+  if (lo === 0) return `${smallNumber(hi)} hundred`;
+  return `${smallNumber(hi)} ${lo < 10 ? `oh ${ONES[lo]}` : smallNumber(lo)}`;
+}
+
+const ROMAN: Record<string, number> = {I: 1, V: 5, X: 10, L: 50, C: 100};
+function fromRoman(r: string): number {
+  let total = 0;
+  for (let i = 0; i < r.length; i++) {
+    const v = ROMAN[r[i]];
+    total += v < (ROMAN[r[i + 1]] ?? 0) ? -v : v;
+  }
+  return total;
+}
+
+/**
+ * Rewrites a clue so every voice reads it naturally: "St." as Saint or State, "Jr." as
+ * Junior, years as years, scores as "23 to 16", records as "11 and 6", Super Bowl numerals
+ * as numbers. Without this, voices say "street", spell out roman numerals and read
+ * years like big numbers.
+ */
+export function spokenText(text: string): string {
+  return (
+    text
+      // "St. Louis", "Amon-Ra St. Brown" -> Saint; "Florida St. defensive end", "Ohio St." -> State.
+      .replace(/\bSt\.(?=\s+[A-Z])/g, 'Saint')
+      .replace(/\bSt\./g, 'State')
+      .replace(/\bJr\./g, 'Junior')
+      .replace(/\bSr\./g, 'Senior')
+      .replace(/\bNo\.\s?(?=\d)/g, 'number ')
+      .replace(/\bvs\.?(?=\s)/gi, 'versus')
+      .replace(/\bSuper Bowl ([IVXLC]+)\b/g, (_, r: string) => `Super Bowl ${fromRoman(r)}`)
+      // Kenneth Walker III -> Kenneth Walker the third.
+      .replace(/(\b[A-Z][a-z]+) (II|III|IV)\b/g, (_, name: string, r: string) =>
+        `${name} the ${({II: 'second', III: 'third', IV: 'fourth'} as Record<string, string>)[r]}`
+      )
+      // Win-loss records: "went 11-6", "a 13-4 record", "10-6-1".
+      .replace(/\b(went|finished|worst|best|record of)( an?)? (\d{1,2})-(\d{1,2})(?:-(\d{1,2}))?\b/gi,
+        (_, w: string, a = '', x: string, y: string, t?: string) => `${w}${a} ${x} and ${y}${t ? ` and ${t}` : ''}`)
+      .replace(/\b(\d{1,2})-(\d{1,2})-(\d{1,2})(?= record)/g, '$1 and $2 and $3')
+      .replace(/\b(\d{1,2})-(\d{1,2})(?= record)/g, '$1 and $2')
+      // Anything else like 23-16 is a score.
+      .replace(/\b(\d{1,2})-(\d{1,2})\b/g, '$1 to $2')
+      // Years, but not counts like "1600 yards".
+      .replace(/\b(19\d\d|20\d\d)\b(?!\s*(?:yards?|points?|receptions?|catches|carries|attempts|passes|tackles|sacks|yds|pts))/g,
+        (y) => spokenYear(Number(y)))
+  );
+}
+
 /** Reads `parts` aloud, cutting off anything still being read. `onDone` runs if it finishes. */
 export function speak(parts: SpeechPart | SpeechPart[], onDone?: () => void) {
   const list = (Array.isArray(parts) ? parts : [parts])
     .map((p) => (typeof p === 'string' ? {text: p, hype: false} : {text: p.text, hype: !!p.hype}))
+    .map((p) => ({...p, text: spokenText(p.text)}))
     .flatMap((p) => splitSentences(p.text).map((text) => ({text, hype: p.hype})))
     .filter((p) => p.text.trim());
   if (!list.length) return;
-  if (useAi() && aiState().status === 'ready') {
-    stopSpeaking();
-    const rate = speechRate();
-    // The AI voice has no pitch control; hype parts just come a touch quicker.
-    speakAi(
-      list.map((p) => ({text: p.text, speed: p.hype ? rate * 1.08 : rate})),
-      aiVoice,
-      onDone,
-      () => {
-        // Too slow this time: the device voice reads it. Twice, and the AI voice is dropped.
-        if (++slowLines >= 2) giveUpOnAi('too slow on this device');
-        speakWithDevice(list, onDone);
-      }
-    );
-    return;
-  }
-  // Still downloading (or it failed): the device voice reads meanwhile.
-  if (useAi() && aiState().status === 'off') loadAiVoice();
   speakWithDevice(list, onDone);
 }
 
 function speakWithDevice(list: {text: string; hype: boolean}[], onDone?: () => void) {
   if (!isSpeechSupported) return;
-  stopAi();
   const synth = window.speechSynthesis;
   current?.();
   synth.cancel();
@@ -237,7 +246,6 @@ function speakWithDevice(list: {text: string; hype: boolean}[], onDone?: () => v
 }
 
 export function stopSpeaking() {
-  stopAi();
   if (!isSpeechSupported) return;
   current?.();
   current = null;
@@ -246,7 +254,6 @@ export function stopSpeaking() {
 
 /** iPhones only allow speech that starts from a tap, so call this from a button press first. */
 export function unlockSpeech() {
-  if (useAi()) unlockAiAudio();
   if (!isSpeechSupported) return;
   const u = new SpeechSynthesisUtterance(' ');
   u.volume = 0;
