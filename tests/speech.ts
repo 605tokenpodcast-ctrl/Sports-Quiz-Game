@@ -90,6 +90,11 @@ check('names, picks, scores, records and Super Bowls read naturally', () => {
   assert.equal(spokenText('won 23-16 in Super Bowl XXXIV'), 'won 23 to 16 in Super Bowl 34');
   assert.equal(spokenText('this team went 13-3 under Jeff Fisher'), 'this team went 13 and 3 under Jeff Fisher');
   assert.equal(spokenText('a 10-6-1 record'), 'a 10 and 6 and 1 record');
+  assert.equal(spokenText('the best record through Week 8, at 7-1.'), 'the best record through Week 8, at 7 and 1.');
+  assert.equal(spokenText('head coach of the Bears, 3-4 so far this season'), 'head coach of the Bears, 3 and 4 so far this season');
+  assert.equal(spokenText('stumbled to a league-worst 2-15 in 2023'), 'stumbled to a league-worst 2 and 15 in twenty twenty-three');
+  assert.equal(spokenText('quarterbacked the Rams to a 23-16 win'), 'quarterbacked the Rams to a 23 to 16 win');
+  assert.equal(spokenText('beating the Packers 28-22.'), 'beating the Packers 28 to 22.');
 });
 
 if (failed) {
