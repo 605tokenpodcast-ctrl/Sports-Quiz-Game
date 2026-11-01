@@ -6,7 +6,7 @@
 // neural voices, Apple's Premium/Enhanced voices, then Google's. Players can also pick a
 // voice and a speed themselves (remembered on that device).
 
-import {aiState, DEFAULT_AI_VOICE, isAiVoice, loadAiVoice, speakAi, stopAi, unlockAiAudio} from './aiVoice';
+import {aiState, DEFAULT_AI_VOICE, giveUpOnAi, isAiVoice, loadAiVoice, speakAi, stopAi, unlockAiAudio} from './aiVoice';
 
 export const isSpeechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
@@ -126,8 +126,15 @@ export const speechRate = () => VOICE_SPEEDS.find((x) => x.id === speed)!.rate;
 export type VoiceEngine = 'device' | 'ai';
 const ENGINE_KEY = 'tts_engine';
 const AI_VOICE_KEY = 'tts_ai_voice';
-// The AI voice by default; it's only downloaded on the device that does the reading.
-let engine: VoiceEngine = readStored(ENGINE_KEY) === 'device' ? 'device' : 'ai';
+// The device voice by default. The AI voice is opt-in, and only ever runs on a stream screen.
+let engine: VoiceEngine = readStored(ENGINE_KEY) === 'ai' ? 'ai' : 'device';
+// Phones never run the AI voice: it's too heavy to share a phone with the game.
+let aiAllowed = false;
+export function setAiAllowed(on: boolean) {
+  aiAllowed = on;
+}
+const useAi = () => engine === 'ai' && aiAllowed;
+let slowLines = 0;
 let aiVoice: string = (() => {
   const v = readStored(AI_VOICE_KEY);
   return isAiVoice(v) ? v : DEFAULT_AI_VOICE;
@@ -146,7 +153,7 @@ export function setAiVoice(v: string, remember = true) {
 }
 /** Call on the device that reads aloud, so the AI voice is ready by the first clue. */
 export function prepareVoice() {
-  if (engine === 'ai') loadAiVoice();
+  if (useAi()) loadAiVoice();
 }
 
 // --- Speaking ---------------------------------------------------------------------------
@@ -183,15 +190,28 @@ export function speak(parts: SpeechPart | SpeechPart[], onDone?: () => void) {
     .flatMap((p) => splitSentences(p.text).map((text) => ({text, hype: p.hype})))
     .filter((p) => p.text.trim());
   if (!list.length) return;
-  if (engine === 'ai' && aiState().status === 'ready') {
+  if (useAi() && aiState().status === 'ready') {
     stopSpeaking();
     const rate = speechRate();
     // The AI voice has no pitch control; hype parts just come a touch quicker.
-    speakAi(list.map((p) => ({text: p.text, speed: p.hype ? rate * 1.08 : rate})), aiVoice, onDone);
+    speakAi(
+      list.map((p) => ({text: p.text, speed: p.hype ? rate * 1.08 : rate})),
+      aiVoice,
+      onDone,
+      () => {
+        // Too slow this time: the device voice reads it. Twice, and the AI voice is dropped.
+        if (++slowLines >= 2) giveUpOnAi('too slow on this device');
+        speakWithDevice(list, onDone);
+      }
+    );
     return;
   }
   // Still downloading (or it failed): the device voice reads meanwhile.
-  if (engine === 'ai') loadAiVoice();
+  if (useAi() && aiState().status === 'off') loadAiVoice();
+  speakWithDevice(list, onDone);
+}
+
+function speakWithDevice(list: {text: string; hype: boolean}[], onDone?: () => void) {
   if (!isSpeechSupported) return;
   stopAi();
   const synth = window.speechSynthesis;
@@ -226,7 +246,7 @@ export function stopSpeaking() {
 
 /** iPhones only allow speech that starts from a tap, so call this from a button press first. */
 export function unlockSpeech() {
-  unlockAiAudio();
+  if (useAi()) unlockAiAudio();
   if (!isSpeechSupported) return;
   const u = new SpeechSynthesisUtterance(' ');
   u.volume = 0;

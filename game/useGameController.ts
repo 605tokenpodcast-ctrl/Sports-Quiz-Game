@@ -25,6 +25,7 @@ import {
   getVoiceEngine,
   getVoiceSpeed,
   prepareVoice,
+  setAiAllowed,
   setAiVoice as setSpeechAiVoice,
   setVoiceEngine as setSpeechEngine,
   VoiceEngine,
@@ -1513,6 +1514,9 @@ export function useGameController() {
   // Reading aloud happens on one device: the stream screen if one is watching, otherwise the host.
   const speaksHere =
     readAloud && isSpeechSupported && (deviceRole === 'SCREEN' || (deviceRole === 'HOST' && screenCount === 0));
+
+  // Only a stream screen may run the AI voice; on a phone it's too heavy to share with the game.
+  useEffect(() => setAiAllowed(deviceRole === 'SCREEN'), [deviceRole]);
 
   // Start downloading the AI voice on the reading device as soon as it's needed.
   useEffect(() => {
