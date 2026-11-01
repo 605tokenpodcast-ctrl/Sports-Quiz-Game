@@ -520,27 +520,150 @@ async function main() {
     const weeklyCat = category('this_week', 'This Week in the NFL', 'Big performances and results from the latest weeks of games.');
     const allTeamsNow = teamsInSeason(cs, games);
 
+    // Each recent week becomes a handful of storylines (upsets, overtime, game-winning kicks,
+    // big stat lines, sack parties), ranked by how notable they are. Plain "this team beat the
+    // Cowboys 24-16" results made dull questions, so ordinary games are left out.
+    const NEUTRAL_CITIES: Record<string, string> = {
+      'Tottenham Hotspur Stadium': 'London', 'Wembley Stadium': 'London', 'Stade de France': 'Paris',
+      'FC Bayern Munich Stadium': 'Munich', 'Allianz Arena': 'Munich', 'Deutsche Bank Park': 'Frankfurt',
+      'Olympiastadion Berlin': 'Berlin', 'Bernabeu': 'Madrid', 'Maracana Stadium': 'Rio de Janeiro',
+      'Arena Corinthians': 'Sao Paulo', 'Estadio Banorte': 'Mexico City', 'Estadio Azteca': 'Mexico City',
+      'Melbourne Cricket Ground': 'Melbourne', 'Croke Park': 'Dublin',
+    };
+    /** "On Monday Night Football in Week 5", "In London in Week 6", or "In Week 7". */
+    const whenOf = (g: Row, w: number) => {
+      const night = g.gametime >= '19:00';
+      const show = g.weekday === 'Thursday' ? 'Thursday Night Football'
+        : g.weekday === 'Monday' ? 'Monday Night Football'
+        : g.weekday === 'Sunday' && night ? 'Sunday Night Football' : '';
+      if (show) return `On ${show} in Week ${w}`;
+      const city = g.location === 'Neutral' ? NEUTRAL_CITIES[g.stadium] : '';
+      return city ? `In ${city} in Week ${w}` : `In Week ${w}`;
+    };
+    const nick = (code: string) => { try { return nickname(teamName(code, cs)); } catch { return ''; } };
+    const num0 = (s: string | undefined) => num(s) || 0;
+    const timesWord = (n: number) => (n === 2 ? 'twice' : n === 3 ? 'three times' : `${n} times`);
+    const ydsTds = (yds: number, tds: number) => `${fmt(yds)} yards${tds === 1 ? ' and a touchdown' : tds ? ` and ${tds} touchdowns` : ''}`;
+
     for (let w = Math.max(1, latestFullWeek - 2); w <= latestFullWeek; w++) {
-      const wk = weekStats.filter((r) => num(r.week) === w && r.season_type === 'REG');
-      for (const d of statDefs.slice(0, 5)) {
-        const top = leaders(wk, (r) => num(r[d.col]), d.gap);
-        if (!top) continue;
-        const p = top[0];
-        let vs = '';
-        try { vs = p.opponent_team ? ` against the ${nickname(teamName(p.opponent_team, cs))}` : ''; } catch { vs = ''; }
-        add(weeklyCat, `wk_${cs}_${w}_${d.col}`, `In Week ${w}, this ${whoTag(p, cs)} put up a league-best ${fmt(num(p[d.col]))} ${d.label}${vs}.`,
-          p.player_display_name, pickDistractors(p.player_display_name, top.slice(1, 8).map((r) => r.player_display_name), [], `wk${w}${d.col}`),
-          latestFullWeek - w + 2, nameAliases(p.player_display_name));
-      }
-      for (const g of played.filter((g) => num(g.season) === cs && num(g.week) === w && g.game_type === 'REG')) {
-        if (g.home_score === g.away_score) continue;
+      const weekGames = played.filter((g) => num(g.season) === cs && num(g.week) === w && g.game_type === 'REG');
+      const gameById = new Map(weekGames.map((g) => [g.game_id, g]));
+      const weekTeams = weekGames.flatMap((g) => [name(g, 'home'), name(g, 'away')]);
+      const wk = weekStats.filter((r) => num(r.week) === w && r.season_type === 'REG' && gameById.has(r.game_id));
+      const stories: { gameId: string; score: number; kicker: boolean; emit: () => void }[] = [];
+      const story = (gameId: string, score: number, emit: () => void, kicker = false) => stories.push({ gameId, score, kicker, emit });
+      const diff = latestFullWeek - w; // older weeks are a little harder
+
+      // ---- Team storylines: one per notable game, the best angle wins ----
+      const decided = weekGames.filter((g) => g.home_score !== g.away_score);
+      const info = decided.map((g) => {
         const homeWon = num(g.home_score) > num(g.away_score);
-        const winner = name(g, homeWon ? 'home' : 'away'), loser = name(g, homeWon ? 'away' : 'home');
-        const hi = Math.max(num(g.home_score), num(g.away_score)), lo = Math.min(num(g.home_score), num(g.away_score));
-        const sameWeek = played.filter((x) => num(x.season) === cs && num(x.week) === w).flatMap((x) => [name(x, 'home'), name(x, 'away')]);
-        const where = homeWon ? 'at home' : 'on the road';
-        add(weeklyCat, `game_${g.game_id}`, `In Week ${w}, this team beat the ${loser} ${hi}-${lo} ${where}.`, winner,
-          pickDistractors(winner, [], sameWeek.filter((t) => t !== loser), `g${g.game_id}`), latestFullWeek - w + 1, teamAliases(winner));
+        const [ws, ls] = homeWon ? ['home', 'away'] as const : ['away', 'home'] as const;
+        const hi = num(g[`${ws}_score`]), lo = num(g[`${ls}_score`]);
+        const spread = num0(g.spread_line); // > 0 means the home team was favored
+        const dogBy = homeWon ? -spread : spread; // how many points the winner was getting
+        return { g, winner: name(g, ws), loser: name(g, ls), wQb: g[`${ws}_qb_name`], lQb: g[`${ls}_qb_name`], hi, lo, margin: hi - lo, total: hi + lo, dogBy, ot: g.overtime === '1' };
+      });
+      const biggestUpset = Math.max(0, ...info.map((i) => i.dogBy));
+      const biggestRout = Math.max(0, ...info.map((i) => i.margin));
+      const mostPoints = Math.max(0, ...info.map((i) => i.total));
+      for (const i of info) {
+        const when = whenOf(i.g, w);
+        const by = i.wQb ? `${i.wQb} and this team` : 'this team';
+        const angles: { score: number; clue: string }[] = [];
+        if (i.dogBy >= 3.5) angles.push({
+          score: 45 + i.dogBy * 4,
+          clue: `${when}, ${by} pulled off ${i.dogBy === biggestUpset ? 'the upset of the week' : 'an upset'}, knocking off ${i.lQb ? `${i.lQb} and ` : ''}the ${nickname(i.loser)} ${i.hi}-${i.lo} as ${i.dogBy}-point underdogs.`,
+        });
+        if (i.ot) angles.push({ score: 62, clue: `${when}, it took overtime, but ${by} finally outlasted the ${i.loser}, ${i.hi}-${i.lo}.` });
+        if (i.lo === 0) angles.push({ score: 58, clue: `${when}, this team's defense pitched a shutout, blanking ${i.lQb ? `${i.lQb} and ` : ''}the ${nickname(i.loser)} ${i.hi}-0.` });
+        if (i.margin >= 21 && i.margin === biggestRout) angles.push({ score: 40 + i.margin, clue: `${when}, nobody rolled harder: ${by} hung ${i.hi} points on the ${i.loser} in a ${i.margin}-point rout.` });
+        if (i.total >= 55 && i.total === mostPoints) angles.push({ score: 35 + i.total / 2, clue: `${when}, ${by} survived the highest-scoring game of the week, a ${i.hi}-${i.lo} shootout with the ${i.loser}.` });
+        const best = angles.sort((a, b) => b.score - a.score)[0];
+        if (!best) continue;
+        story(i.g.game_id, best.score, () => add(weeklyCat, `wkteam_${i.g.game_id}`, best.clue, i.winner,
+          pickDistractors(i.winner, [], weekTeams.filter((t) => t !== i.loser), `wt${i.g.game_id}`), diff + 1, teamAliases(i.winner)));
+      }
+
+      // ---- Player storylines ----
+      const resultFor = (r: Row) => {
+        const g = gameById.get(r.game_id)!;
+        const side = g.home_team === r.team ? 'home' : 'away';
+        const us = num(g[`${side}_score`]), them = num(g[`${side === 'home' ? 'away' : 'home'}_score`]);
+        const opp = nick(r.opponent_team);
+        const oppQb = g[`${side === 'home' ? 'away' : 'home'}_qb_name`];
+        const res = us > them ? `in a ${us}-${them} win over the ${opp}` : us < them ? `in a ${them}-${us} loss to the ${opp}` : `in a ${us}-${them} tie with the ${opp}`;
+        return { g, opp, oppQb, res, won: us > them, us, them };
+      };
+      /** Wrong answers: same position group that week, busiest players first. */
+      const peers = (r: Row, rank: (x: Row) => number) => wk
+        .filter((x) => x.player_id !== r.player_id && posGroup(x.position) === posGroup(r.position))
+        .sort((a, b) => rank(b) - rank(a)).map((x) => x.player_display_name);
+      const playerQ = (r: Row, kind: string, score: number, clue: string, rank: (x: Row) => number, extra = 0) =>
+        story(r.game_id, score, () => add(weeklyCat, `wk_${cs}_${w}_${kind}_${r.player_id}`, clue, r.player_display_name,
+          pickDistractors(r.player_display_name, peers(r, rank).slice(0, 4), peers(r, rank).slice(4, 30), `wp${w}${kind}${r.player_id}`),
+          diff + 1 + extra, nameAliases(r.player_display_name)), r.position === 'K');
+      const fp = (x: Row) => num0(x.fantasy_points_ppr);
+      const defRank = (x: Row) => num0(x.def_sacks) * 3 + num0(x.def_interceptions) * 3 + num0(x.def_tackles_solo);
+      const kRank = (x: Row) => num0(x.fg_made) + num0(x.fg_long) / 10;
+
+      let longestKick: Row | null = null;
+      for (const r of wk) {
+        if (!r.team || !nick(r.team)) continue;
+        const { opp, oppQb, res, us, them } = resultFor(r);
+        const team = nick(r.team);
+        const when = whenOf(gameById.get(r.game_id)!, w);
+        const pos = posWord(r.position);
+
+        const gw = num0(r.gwfg_made);
+        if (gw > 0) {
+          const dist = num0(r.gwfg_distance) || num0(r.fg_long);
+          playerQ(r, 'gwfg', 70 + dist / 2,
+            `${when}, this ${team} kicker drilled a ${dist ? `${dist}-yard ` : ''}game-winning field goal to beat the ${opp} ${us}-${them}.`, kRank, 1);
+        } else if (num0(r.fg_long) >= 56 && (!longestKick || num0(r.fg_long) > num0(longestKick.fg_long))) longestKick = r;
+
+        const pTd = num0(r.passing_tds), pYd = num0(r.passing_yards);
+        if (pTd >= 4) playerQ(r, 'pass', 45 + pTd * 6 + pYd / 50,
+          `${when}, this ${team} quarterback carved up the ${opp} for ${pTd} touchdown passes and ${fmt(pYd)} yards.`, fp);
+        else if (pYd >= 350) playerQ(r, 'pass', 40 + (pYd - 300) / 5,
+          `${when}, this ${team} quarterback lit up the ${opp} for ${fmt(pYd)} passing yards ${res}.`, fp);
+
+        const rYd = num0(r.rushing_yards), rTd = num0(r.rushing_tds);
+        if (rYd >= 140 || rTd >= 3) playerQ(r, 'rush', 40 + rYd / 10 + rTd * 8,
+          `${when}, this ${team} ${r.position === 'QB' ? 'quarterback took off and ran' : `${pos} ran wild`} for ${ydsTds(rYd, rTd)} ${res}.`, fp);
+        else if (r.position === 'QB' && rYd >= 80) playerQ(r, 'qbrun', 45 + rYd / 10,
+          `${when}, this ${team} quarterback did it with his legs, running for ${fmt(rYd)} yards ${res}.`, fp);
+
+        const cYd = num0(r.receiving_yards), cTd = num0(r.receiving_tds), rec = num0(r.receptions);
+        if (cYd >= 140 || cTd >= 3) playerQ(r, 'rec', 40 + cYd / 10 + cTd * 8,
+          `${when}, this ${team} ${pos} hauled in ${plural(rec, 'catch', 'catches')} for ${ydsTds(cYd, cTd)} ${res}.`, fp);
+
+        const sacks = num0(r.def_sacks);
+        if (sacks >= 3) playerQ(r, 'sacks', 50 + sacks * 5,
+          `${when}, this ${team} ${pos} made life miserable for ${oppQb || `the ${opp} quarterback`}, racking up ${fmt(sacks)} sacks.`, defRank, 1);
+        const ints = num0(r.def_interceptions);
+        if (ints >= 2) playerQ(r, 'ints', 48 + ints * 6,
+          `${when}, this ${team} ${pos} picked off ${oppQb || `the ${opp} quarterback`} ${timesWord(ints)} ${res}.`, defRank, 1);
+        if (num0(r.def_tds) > 0) playerQ(r, 'deftd', 60,
+          `${when}, this ${team} ${pos} took one to the house for a defensive touchdown ${res}.`, defRank, 1);
+        if (num0(r.special_teams_tds) > 0) playerQ(r, 'sttd', 58,
+          `${when}, this ${team} ${pos} found the end zone on special teams ${res}.`, defRank, 1);
+      }
+      if (longestKick) {
+        const r = longestKick, { opp } = resultFor(r);
+        playerQ(r, 'longfg', 40 + (num0(r.fg_long) - 55) * 4,
+          `${whenOf(gameById.get(r.game_id)!, w)}, this ${nick(r.team)} kicker hit the longest field goal of the week, a ${num0(r.fg_long)}-yarder against the ${opp}.`, kRank, 1);
+      }
+
+      // Keep the best of the week: no more than two questions from any one game, two kickers a week.
+      const perGame = new Map<string, number>();
+      let kept = 0, kickers = 0;
+      for (const s of stories.sort((a, b) => b.score - a.score)) {
+        if (kept >= 12 || (perGame.get(s.gameId) ?? 0) >= 2 || (s.kicker && kickers >= 2)) continue;
+        if (s.kicker) kickers++;
+        perGame.set(s.gameId, (perGame.get(s.gameId) ?? 0) + 1);
+        s.emit();
+        kept++;
       }
     }
 
