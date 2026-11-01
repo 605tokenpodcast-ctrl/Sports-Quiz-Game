@@ -21,7 +21,6 @@ export default function PhoneScreen() {
     round2Board,
     answeredClueIds,
     roundMaxClue,
-    boardColsClass,
     activeSelector,
     contestants,
     activeClue,
@@ -338,36 +337,40 @@ export default function PhoneScreen() {
                     <span>YOU HAVE BOARD CONTROL! Pick a Clue Tile:</span>
                   </div>
 
-                  {/* Compact Mobile Selection Grid */}
-                  <div className={`grid ${boardColsClass} gap-1`}>
+                  {/* One row per category, so the names have room to be read and the tiles are big enough to tap */}
+                  <div className="flex flex-col gap-1.5">
                     {board.map((cat, cIdx) => (
-                      <div key={cat.title} className="flex flex-col gap-1">
-                        <div className="text-[8px] font-bold text-amber-300 truncate text-center p-1 bg-blue-950 rounded border border-blue-800" title={cat.title}>
+                      <div key={cat.title} className="flex items-stretch gap-1.5">
+                        <div
+                          className="w-[30%] shrink-0 flex items-center px-1.5 py-1 bg-blue-950 rounded-lg border border-blue-800 text-left text-[11px] sm:text-xs font-black text-amber-300 uppercase leading-tight line-clamp-3 break-words"
+                          title={cat.title}>
                           {cat.title}
                         </div>
-                        {cat.clues.map((clue, rIdx) => {
-                          const isAnswered = answeredClueIds.has(clue.id);
-                          return (
-                            <button
-                              key={clue.id}
-                              disabled={isAnswered}
-                              onClick={() => {
-                                p2pRef.current?.send({
-                                  type: 'CLIENT_SELECT_CLUE',
-                                  contestantId: mySeat,
-                                  catIdx: cIdx,
-                                  clueIdx: rIdx,
-                                });
-                              }}
-                              className={`py-1.5 rounded text-[10px] sm:text-xs font-black border transition-all ${
-                                isAnswered
-                                  ? 'bg-slate-950 text-slate-700 border-slate-800'
-                                  : 'bg-blue-900 hover:bg-blue-800 text-amber-300 border-amber-500/60 active:scale-95 shadow'
-                              }`}>
-                              ${clue.value}
-                            </button>
-                          );
-                        })}
+                        <div className="flex-1 grid gap-1" style={{gridTemplateColumns: `repeat(${cat.clues.length}, minmax(0, 1fr))`}}>
+                          {cat.clues.map((clue, rIdx) => {
+                            const isAnswered = answeredClueIds.has(clue.id);
+                            return (
+                              <button
+                                key={clue.id}
+                                disabled={isAnswered}
+                                onClick={() => {
+                                  p2pRef.current?.send({
+                                    type: 'CLIENT_SELECT_CLUE',
+                                    contestantId: mySeat,
+                                    catIdx: cIdx,
+                                    clueIdx: rIdx,
+                                  });
+                                }}
+                                className={`min-h-[48px] px-0 rounded-lg text-[clamp(10px,3vw,14px)] tracking-tight font-black border-2 transition-all ${
+                                  isAnswered
+                                    ? 'bg-slate-950 text-slate-700 border-slate-800'
+                                    : 'bg-blue-900 hover:bg-blue-800 text-amber-300 border-amber-500/60 active:scale-95 shadow'
+                                }`}>
+                                {isAnswered ? '' : `$${clue.value}`}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     ))}
                   </div>
