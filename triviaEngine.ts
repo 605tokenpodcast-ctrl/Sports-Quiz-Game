@@ -141,6 +141,91 @@ export const PEER_BANKS = {
 // DYNAMIC CONTEXTUAL DISTRACTOR GENERATOR FOR 8-CHOICE & 4-CHOICE FORMATS
 // ===========================================================================
 
+export type AnswerKind = 'number' | 'year' | 'score' | 'team' | 'person' | 'other';
+
+const TEAM_NICKNAMES = [
+  'Cardinals', 'Falcons', 'Ravens', 'Bills', 'Panthers', 'Bears', 'Bengals', 'Browns', 'Cowboys',
+  'Broncos', 'Lions', 'Packers', 'Texans', 'Colts', 'Jaguars', 'Chiefs', 'Raiders', 'Chargers',
+  'Rams', 'Dolphins', 'Vikings', 'Patriots', 'Saints', 'Giants', 'Jets', 'Eagles', 'Steelers',
+  '49ers', 'Seahawks', 'Buccaneers', 'Titans', 'Commanders', 'Redskins', 'Oilers', 'Football Team',
+];
+const PLACE_WORDS = /\b(stadium|field|park|dome|bowl|coliseum|center|centre|arena|superdome|college|university|state|tech|a&m|round|pick|overall|yards?|points?|wins?|losses?|games?)\b/i;
+
+/**
+ * What kind of thing an answer is, so wrong options can be the same kind:
+ * numbers with numbers, years with years, scores with scores, teams with teams, people with people.
+ */
+export function answerKind(answer: string): AnswerKind {
+  const a = sanitizeAnswerChoice(answer);
+  if (/^(19|20)\d\d$/.test(a)) return 'year';
+  if (/^\d[\d,]*$/.test(a)) return 'number';
+  if (/^\d{1,2}\s*[-\u2013]\s*\d{1,2}$/.test(a)) return 'score';
+  if (TEAM_NICKNAMES.some((n) => a === n || a.endsWith(` ${n}`))) return 'team';
+  if (!/\d/.test(a) && !PLACE_WORDS.test(a) && /^[A-Z][A-Za-z.'\-]*( [A-Z][A-Za-z.'\-]*){1,3}$/.test(a)) return 'person';
+  return 'other';
+}
+
+const NUMERIC_KINDS: AnswerKind[] = ['number', 'year', 'score'];
+
+/** True when offering `b` as a wrong answer to an `a` answer would look out of place. */
+function kindsClash(a: AnswerKind, b: AnswerKind): boolean {
+  if (a === b) return false;
+  if ((a === 'number' && b === 'year') || (a === 'year' && b === 'number')) return false;
+  if (NUMERIC_KINDS.includes(a) || NUMERIC_KINDS.includes(b)) return true;
+  return (a === 'team' && b === 'person') || (a === 'person' && b === 'team');
+}
+
+/** Same-kind number fillers close to the answer ("13" gives 12, 14, 11, 15 ...). */
+function nearbyNumbers(answer: string, kind: 'number' | 'year', taken: Set<string>, want: number): string[] {
+  const n = parseInt(answer.replace(/,/g, ''), 10);
+  if (isNaN(n)) return [];
+  const big = n >= 1000 && kind === 'number';
+  const step = big ? Math.max(1, Math.round(n * 0.04)) : 1;
+  const out: string[] = [];
+  for (let k = 1; out.length < want && k < 60; k++) {
+    for (const v of [n + k * step, n - k * step]) {
+      if (v < 0 || out.length >= want) continue;
+      if (kind === 'year' && v > new Date().getFullYear()) continue;
+      const str = big ? v.toLocaleString('en-US') : String(v);
+      const norm = normalizeAnswer(str);
+      if (taken.has(norm)) continue;
+      taken.add(norm);
+      out.push(str);
+    }
+  }
+  return out;
+}
+
+/** Same-kind score fillers close to the answer ("23-16" gives 24-16, 23-17 ...), winner's score stays higher. */
+function nearbyScores(answer: string, taken: Set<string>, want: number): string[] {
+  const m = answer.match(/^(\d+)\s*[-\u2013]\s*(\d+)$/);
+  if (!m) return [];
+  const [w, l] = [parseInt(m[1], 10), parseInt(m[2], 10)];
+  const out: string[] = [];
+  const deltas = [3, -3, 7, -7, 4, -4, 6, -6, 10, -10, 1, -1, 2, -2];
+  for (const dw of deltas) {
+    for (const dl of [0, ...deltas]) {
+      if (out.length >= want) return out;
+      const a = w + dw;
+      const b = l + dl;
+      if (b < 0 || a <= b) continue;
+      const str = `${a}-${b}`;
+      const norm = normalizeAnswer(str);
+      if (taken.has(norm)) continue;
+      taken.add(norm);
+      out.push(str);
+    }
+  }
+  return out;
+}
+
+const PERSON_BANKS = [PEER_BANKS.nfl_qb, PEER_BANKS.nfl_rb, PEER_BANKS.nfl_wr_te, PEER_BANKS.nfl_defense, PEER_BANKS.nfl_coaches];
+
+/**
+ * Returns the question's wrong answers, padded up to 7 when it has fewer.
+ * Padding is always the same kind as the answer. When no same-kind filler makes sense
+ * (a draft round, a stadium) the question simply shows fewer options.
+ */
 export function generateSmartDistractors(
   correctAnswer: string,
   sport: SportTag,
@@ -149,41 +234,48 @@ export function generateSmartDistractors(
 ): string[] {
   const cleanCorrect = sanitizeAnswerChoice(correctAnswer);
   const target = normalizeAnswer(cleanCorrect);
-  const curatedSet = new Set<string>();
+  const kind = answerKind(cleanCorrect);
+  const curated: string[] = [];
+  const taken = new Set<string>([target]);
 
   existingDistractors.forEach((d) => {
     const cleanD = sanitizeAnswerChoice(d);
-    if (cleanD && normalizeAnswer(cleanD) !== target) {
-      curatedSet.add(cleanD);
-    }
+    const norm = normalizeAnswer(cleanD);
+    if (!cleanD || taken.has(norm)) return;
+    // Drop a wrong answer of a different kind (a name offered for a "how many" question).
+    if (kindsClash(kind, answerKind(cleanD))) return;
+    taken.add(norm);
+    curated.push(cleanD);
   });
 
-  if (curatedSet.size >= 7) {
-    return Array.from(curatedSet);
+  const missing = 7 - curated.length;
+  if (missing <= 0) return curated;
+
+  if (kind === 'number' || kind === 'year') return [...curated, ...nearbyNumbers(cleanCorrect, kind, taken, missing)];
+  if (kind === 'score') return [...curated, ...nearbyScores(cleanCorrect, taken, missing)];
+
+  let pool: string[] = [];
+  if (kind === 'team') {
+    pool = PEER_BANKS.nfl_teams;
+  } else if (kind === 'person') {
+    // Prefer the bank the answer or its wrong answers come from (tight ends with tight ends).
+    const known = new Set([target, ...curated.map(normalizeAnswer)]);
+    const ranked = PERSON_BANKS.map((bank) => ({
+      bank,
+      hits: bank.filter((p) => known.has(normalizeAnswer(p))).length,
+    })).sort((a, b) => b.hits - a.hits);
+    pool = ranked[0].hits > 0 ? ranked[0].bank : PERSON_BANKS.slice(0, 4).flat();
   }
 
-  const candidateBanks: string[][] = [
-    PEER_BANKS.nfl_qb,
-    PEER_BANKS.nfl_rb,
-    PEER_BANKS.nfl_wr_te,
-    PEER_BANKS.nfl_defense,
-    PEER_BANKS.nfl_teams,
-    PEER_BANKS.nfl_coaches,
-  ];
-
-  for (const bank of candidateBanks) {
-    const shuffled = fisherYatesShuffle(bank);
-    for (const peer of shuffled) {
-      const cleanPeer = sanitizeAnswerChoice(peer);
-      if (cleanPeer && normalizeAnswer(cleanPeer) !== target && !curatedSet.has(cleanPeer)) {
-        curatedSet.add(cleanPeer);
-        if (curatedSet.size >= 10) break;
-      }
-    }
-    if (curatedSet.size >= 10) break;
+  const out = [...curated];
+  for (const peer of fisherYatesShuffle(pool)) {
+    if (out.length >= 7) break;
+    const norm = normalizeAnswer(peer);
+    if (taken.has(norm)) continue;
+    taken.add(norm);
+    out.push(peer);
   }
-
-  return Array.from(curatedSet);
+  return out;
 }
 
 // ===========================================================================
