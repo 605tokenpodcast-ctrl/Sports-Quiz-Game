@@ -149,27 +149,31 @@ export default function StreamScreen() {
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 min-h-0 flex items-center justify-center p-4 lg:p-6">
+      {/* Everything in here sizes to the space left between the header and the podiums, so on a short
+          laptop screen the board shrinks instead of running under the scoreboard. */}
+      <main className="relative z-10 flex-1 min-h-0 overflow-hidden flex items-center justify-center p-[clamp(0.5rem,1.5vh,1.5rem)]">
         {!playing && !over && <Lobby />}
         {playing && currentRound !== 'FINAL_SHOWDOWN' && (
           <div className="w-full h-full max-w-[1600px] flex flex-col gap-2">
-            <div className="flex items-center justify-between text-lg lg:text-xl font-bold px-1">
+            <div className="shrink-0 flex items-center justify-between text-[clamp(0.9rem,2.4vh,1.25rem)] font-bold px-1">
               <span className="flex items-center gap-2 text-amber-300">
                 <Star className="w-6 h-6 fill-amber-400 text-amber-400" />
                 Board control: <span className="text-white uppercase">{contestants[activeSelector]?.name}</span>
               </span>
               {aiThinkingStatus && <span className="text-amber-400 animate-pulse">{aiThinkingStatus}</span>}
             </div>
-            <div className={`grid ${boardColsClass} gap-2`}>
+            <div className={`shrink-0 grid ${boardColsClass} gap-2`}>
               {board.map((cat) => (
                 <div
                   key={cat.title}
-                  className="min-h-[90px] bg-gradient-to-b from-blue-800 to-blue-950 border-2 border-blue-500 rounded-lg p-2 flex items-center justify-center text-center">
-                  <span className="text-[clamp(0.9rem,1.5vw,1.8rem)] font-black text-amber-300 uppercase leading-tight">{cat.title}</span>
+                  className="min-h-[clamp(44px,11vh,90px)] bg-gradient-to-b from-blue-800 to-blue-950 border-2 border-blue-500 rounded-lg p-1.5 flex items-center justify-center text-center">
+                  <span className="text-[clamp(0.75rem,min(1.5vw,2.6vh),1.8rem)] font-black text-amber-300 uppercase leading-tight">{cat.title}</span>
                 </div>
               ))}
             </div>
-            <div className={`grid ${boardColsClass} gap-2 flex-1 min-h-0`}>
+            <div
+              className={`grid ${boardColsClass} gap-2 flex-1 min-h-0`}
+              style={{gridTemplateRows: `repeat(${boardRowIndexes.length || 1}, minmax(0, 1fr))`}}>
               {boardRowIndexes.map((rowIdx) =>
                 board.map((cat, catIdx) => {
                   const clue = cat.clues[rowIdx];
@@ -179,7 +183,7 @@ export default function StreamScreen() {
                   return (
                     <div
                       key={clue.id}
-                      className={`rounded-lg border-2 flex items-center justify-center font-black text-[clamp(1.4rem,3.2vw,4rem)] ${
+                      className={`min-h-0 rounded-lg border-2 flex items-center justify-center font-black text-[clamp(1rem,min(3.2vw,6vh),4rem)] ${
                         answered
                           ? 'bg-slate-950/60 border-slate-800 text-transparent'
                           : picking
@@ -201,7 +205,7 @@ export default function StreamScreen() {
 
       {/* Podiums (the results list the scores themselves) */}
       {!over && (
-      <footer className="relative z-10 shrink-0 flex items-end justify-center gap-4 lg:gap-8 px-6 pb-4">
+      <footer className="relative z-10 shrink-0 flex items-end justify-center gap-4 lg:gap-8 px-6 pb-[clamp(0.25rem,1.5vh,1rem)]">
         {activeContestantsList.map((id) => (
           <Podium key={id} id={id} />
         ))}
@@ -268,9 +272,9 @@ function ClueOverlay() {
   const revealed = phase === 'REVEALED';
 
   return (
-    <div className="absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-6">
-      <div className="w-full max-w-[1400px] max-h-full overflow-y-auto bg-gradient-to-b from-blue-900 to-blue-950 border-4 border-amber-400 rounded-3xl p-6 lg:p-10 flex flex-col gap-6 shadow-2xl">
-        <div className="flex items-center justify-between gap-4 text-2xl lg:text-3xl font-black uppercase">
+    <div className="absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-[clamp(0.5rem,2vh,1.5rem)]">
+      <div className="w-full max-w-[1400px] max-h-full overflow-y-auto bg-gradient-to-b from-blue-900 to-blue-950 border-4 border-amber-400 rounded-3xl px-[clamp(1rem,3vw,2.5rem)] py-[clamp(0.75rem,3vh,2.5rem)] flex flex-col gap-[clamp(0.5rem,2.5vh,1.5rem)] shadow-2xl">
+        <div className="flex items-center justify-between gap-4 text-[clamp(1rem,3.6vh,1.875rem)] font-black uppercase">
           <span className="text-amber-300">{clue.category}</span>
           <span className="text-amber-400">
             {activeClue.isBonusWager ? `Daily Double · ${money(activeClue.bonusWagerInput)}` : money(clue.value)}
@@ -284,7 +288,7 @@ function ClueOverlay() {
             <div className="text-2xl lg:text-3xl text-slate-200">{picker?.name} is placing a wager...</div>
           </div>
         ) : (
-          <div className="text-[clamp(1.8rem,3.4vw,4.2rem)] font-bold leading-snug text-center text-white">{clue.clue}</div>
+          <div className="text-[clamp(1.2rem,min(3.4vw,6vh),4.2rem)] font-bold leading-snug text-center text-white">{clue.clue}</div>
         )}
 
         {!hidden && activeClue.options.length > 0 && (
@@ -295,14 +299,14 @@ function ClueOverlay() {
               return (
                 <div
                   key={opt}
-                  className={`rounded-xl border-2 px-4 py-3 text-xl lg:text-2xl font-bold flex items-center gap-3 ${
+                  className={`rounded-xl border-2 px-4 py-[clamp(0.25rem,1.2vh,0.75rem)] text-[clamp(1rem,3vh,1.5rem)] font-bold flex items-center gap-3 ${
                     right
                       ? 'bg-emerald-500 border-white text-slate-950'
                       : picked
                       ? 'bg-rose-600 border-white text-white'
                       : 'bg-blue-950/80 border-blue-600 text-slate-100'
                   }`}>
-                  <span className="w-9 h-9 rounded-lg border-2 border-amber-400 flex items-center justify-center font-black shrink-0">
+                  <span className="w-[1.6em] h-[1.6em] rounded-lg border-2 border-amber-400 flex items-center justify-center font-black shrink-0">
                     {String.fromCharCode(65 + i)}
                   </span>
                   {opt}
@@ -312,7 +316,7 @@ function ClueOverlay() {
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-4 text-2xl lg:text-4xl font-black text-center">
+        <div className="flex items-center justify-center gap-4 text-[clamp(1.1rem,4.4vh,2.25rem)] font-black text-center">
           {revealed ? (
             <span className="text-emerald-300">Answer: {clue.correctAnswer}</span>
           ) : phase === 'READING' ? (
@@ -489,12 +493,12 @@ function Podium({id}: {id: ContestantId}) {
           ? 'border-amber-500/80 bg-slate-900'
           : 'border-slate-700 bg-slate-900'
       }`}>
-      <div className={`h-2 ${buzzed ? 'bg-amber-400 animate-pulse' : 'bg-blue-700/60'}`} />
-      <div className="px-4 py-2 flex items-center justify-center gap-2 text-xl lg:text-2xl font-black uppercase truncate">
+      <div className={`h-1.5 ${buzzed ? 'bg-amber-400 animate-pulse' : 'bg-blue-700/60'}`} />
+      <div className="px-4 py-[clamp(0.15rem,0.8vh,0.5rem)] flex items-center justify-center gap-2 text-[clamp(1rem,2.8vh,1.5rem)] font-black uppercase truncate">
         {control && <Star className="w-5 h-5 fill-amber-400 text-amber-400 shrink-0" />}
         <span className="truncate">{c.name}</span>
       </div>
-      <div className={`pb-3 text-center font-mono font-black text-3xl lg:text-4xl ${c.score >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+      <div className={`pb-[clamp(0.15rem,1vh,0.75rem)] text-center font-mono font-black text-[clamp(1.25rem,4.4vh,2.25rem)] ${c.score >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
         {money(c.score)}
       </div>
     </div>
