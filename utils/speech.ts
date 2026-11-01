@@ -176,6 +176,15 @@ function fromRoman(r: string): number {
   return total;
 }
 
+/** Whether "N-N" between `before` and `after` is a win-loss record rather than a score. */
+function isRecord(before: string, after: string): boolean {
+  return (
+    /\b(went|go|goes|going|finished|finishing|worst|best|league-worst|league-best|at|record of|records? (?:is|was|of)|start(?:ed)? (?:at|the season)|improved to|fell to|dropped to|stumbled to an?|sits? at|stand(?:s|ing)? at)\s*$/i.test(before) ||
+    /^\s*(record|start|so far|this season|on the season|on the year|in the standings|overall|mark)\b/i.test(after) ||
+    /^\s*\)/.test(after) && /\(\s*$/.test(before)
+  );
+}
+
 /**
  * Rewrites a clue so every voice reads it naturally: "St." as Saint or State, "Jr." as
  * Junior, years as years, scores as "23 to 16", records as "11 and 6", Super Bowl numerals
@@ -197,13 +206,12 @@ export function spokenText(text: string): string {
       .replace(/(\b[A-Z][a-z]+) (II|III|IV)\b/g, (_, name: string, r: string) =>
         `${name} the ${({II: 'second', III: 'third', IV: 'fourth'} as Record<string, string>)[r]}`
       )
-      // Win-loss records: "went 11-6", "a 13-4 record", "10-6-1".
-      .replace(/\b(went|finished|worst|best|record of)( an?)? (\d{1,2})-(\d{1,2})(?:-(\d{1,2}))?\b/gi,
-        (_, w: string, a = '', x: string, y: string, t?: string) => `${w}${a} ${x} and ${y}${t ? ` and ${t}` : ''}`)
-      .replace(/\b(\d{1,2})-(\d{1,2})-(\d{1,2})(?= record)/g, '$1 and $2 and $3')
-      .replace(/\b(\d{1,2})-(\d{1,2})(?= record)/g, '$1 and $2')
-      // Anything else like 23-16 is a score.
-      .replace(/\b(\d{1,2})-(\d{1,2})\b/g, '$1 to $2')
+      // Win-loss records ("went 11-6", "at 7-1", "3-4 so far") read with "and"; scores ("a 23-16 win") with "to".
+      .replace(/\b(\d{1,2})-(\d{1,2})(?:-(\d{1,2}))?\b/g, (m: string, a: string, b: string, t: string | undefined, at: number, all: string) =>
+        isRecord(all.slice(Math.max(0, at - 30), at), all.slice(at + m.length, at + m.length + 30))
+          ? `${a} and ${b}${t ? ` and ${t}` : ''}`
+          : `${a} to ${b}${t ? ` to ${t}` : ''}`
+      )
       // Years, but not counts like "1600 yards".
       .replace(/\b(19\d\d|20\d\d)\b(?!\s*(?:yards?|points?|receptions?|catches|carries|attempts|passes|tackles|sacks|yds|pts))/g,
         (y) => spokenYear(Number(y)))
