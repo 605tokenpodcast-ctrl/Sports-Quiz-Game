@@ -56,7 +56,7 @@ import {
   isOpenAnswerMode,
   MatchStats,
   NO_FINAL_LOCKS,
-  REMOTE_SEATS,
+  remoteSeatsFor,
   RemoteSeat,
   RoundType,
   seatLabel,
@@ -180,6 +180,17 @@ export function useGameController() {
   // Full: 6 categories x 5 clues per round. Short: 5 categories x 3 clues per round.
   const [gameLength, setGameLength] = useState<GameLength>('FULL');
   const [isTwoPlayerMode, setIsTwoPlayerMode] = useState(false);
+  // Whether this host device also plays as Player 1. Off, it only hosts (a laptop on the
+  // stream) and all three players are on phones, with the first phone to join as P1.
+  const [hostPlays, setHostPlaysState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('host_plays') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const hostPlaysRef = useRef(hostPlays);
+  hostPlaysRef.current = hostPlays;
   // Read each clue aloud. The buzzers wait until it has been read. The stream screen does the
   // reading when one is connected, otherwise the host device does.
   const [readAloud, setReadAloudState] = useState(() => {
@@ -374,6 +385,16 @@ export function useGameController() {
   // Stream screen: the podium lineup the host is showing.
   const [syncedLineup, setSyncedLineup] = useState<ContestantId[]>(['player', 'player2', 'analyst']);
   const player3Human = Object.values(remoteSeats).includes('analyst');
+  // Switching who plays P1 only makes sense before anyone has a seat.
+  const setHostPlays = useCallback((next: boolean) => {
+    if (Object.keys(remoteSeatsRef.current).length > 0) return;
+    setHostPlaysState(next);
+    try {
+      localStorage.setItem('host_plays', String(next));
+    } catch {
+      /* storage blocked: the choice lasts until reload */
+    }
+  }, []);
   const onlineRemoteSeats = Object.values(remoteSeats);
   const isHumanSeat = (id: ContestantId) => id === 'player' || id === 'player2' || (id === 'analyst' && player3Human);
 
@@ -384,14 +405,18 @@ export function useGameController() {
   // Host: which phone (by its device id) last sat in each seat.
   const seatDevicesRef = useRef<Partial<Record<RemoteSeat, string>>>({});
   const player2Away = awaySeats.player2 !== undefined;
+  // Only a phone playing P1 (when the host doesn't play) can be away.
+  const player1Away = awaySeats.player !== undefined;
 
   // Seats that take part in buzzer races right now.
   const buzzerSeats = useMemo<ContestantId[]>(
     () =>
       isTwoPlayerMode || isClientConnected
-        ? (['player', 'player2', 'analyst'] as ContestantId[]).filter((id) => !(id === 'player2' && player2Away))
+        ? (['player', 'player2', 'analyst'] as ContestantId[]).filter(
+            (id) => !(id === 'player2' && player2Away) && !(id === 'player' && player1Away)
+          )
         : ['player', 'coach', 'analyst'],
-    [isTwoPlayerMode, isClientConnected, player2Away]
+    [isTwoPlayerMode, isClientConnected, player2Away, player1Away]
   );
 
   // The podium lineup. A stream screen shows whatever the host shows.
@@ -455,19 +480,22 @@ export function useGameController() {
         localStorage.setItem('player_tag', clean);
       }
 
-      setContestants((prev) => ({
-        ...prev,
-        player: {
-          ...prev.player,
-          name: isTwoPlayerMode || isClientConnected ? `${clean} (P1)` : clean,
-        },
-      }));
+      // A phone playing P1 has its own name; the host's tag only names P1 when the host plays.
+      if (hostPlays) {
+        setContestants((prev) => ({
+          ...prev,
+          player: {
+            ...prev.player,
+            name: isTwoPlayerMode || isClientConnected ? `${clean} (P1)` : clean,
+          },
+        }));
+      }
 
       setIsTagEditorOpen(false);
       gameAudio.playConfirmSelect();
       showToast(`✓ Contestant tag saved as "${clean}"`);
     },
-    [tagEditorInput, isTwoPlayerMode, isClientConnected, showToast]
+    [tagEditorInput, isTwoPlayerMode, isClientConnected, showToast, hostPlays]
   );
 
   // Reset Seen Questions History
@@ -739,9 +767,10 @@ export function useGameController() {
       },
       player: {
         id: 'player',
-        name: isTwoPlayerMode || isClientConnected ? `${playerName} (P1)` : `${playerName}`,
+        // A phone playing P1 keeps the name it joined with.
+        name: !hostPlays ? prev.player.name : isTwoPlayerMode || isClientConnected ? `${playerName} (P1)` : `${playerName}`,
         shortName: 'P1',
-        title: 'Host Champion',
+        title: hostPlays ? 'Host Champion' : 'Online Challenger',
         score: 0,
         reaction: 'idle',
         correctCount: 0,
@@ -800,7 +829,7 @@ export function useGameController() {
     setIsInviteModalOpen(false);
     setIsLeaderboardOpen(false);
     setIsTagEditorOpen(false);
-  }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human, readAloud]);
+  }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human, readAloud, hostPlays]);
 
   // Buzzer races. With friends on phones, buzzes are collected for a moment and the earliest
   // press wins, counting each phone's network delay, so the host's own phone has no head start.
@@ -983,7 +1012,7 @@ export function useGameController() {
           const seat =
             awayList.find((s) => msg.deviceId && seatDevices[s] === msg.deviceId) ||
             awayList.find((s) => msg.playerName && away[s] === msg.playerName) ||
-            REMOTE_SEATS.find((s) => !taken.has(s) && away[s] === undefined) ||
+            remoteSeatsFor(hostPlaysRef.current).find((s) => !taken.has(s) && away[s] === undefined) ||
             awayList[0];
           if (!seat) {
             showToast('The room is full (3 players max).');
@@ -1062,7 +1091,8 @@ export function useGameController() {
           case 'CLIENT_FINAL_WAGER': {
             if (finalShowdownPhase !== 'WAGER' || finalLocks.wager[seat]) break;
             const wager = clampFinalWager(msg.wager, contestants[seat]?.score || 0);
-            if (seat === 'player2') setPlayer2FinalWager(wager);
+            if (seat === 'player') setPlayerFinalWager(wager);
+            else if (seat === 'player2') setPlayer2FinalWager(wager);
             else setPlayer3FinalWager(wager);
             if (msg.lockIn) setFinalLocks((l) => ({...l, wager: {...l.wager, [seat]: true}}));
             break;
@@ -1070,7 +1100,8 @@ export function useGameController() {
 
           case 'CLIENT_FINAL_ANSWER':
             if (finalShowdownPhase !== 'CLUE' || finalLocks.answer[seat]) break;
-            if (seat === 'player2') setFinalPlayer2Input(msg.answer);
+            if (seat === 'player') setFinalPlayerInput(msg.answer);
+            else if (seat === 'player2') setFinalPlayer2Input(msg.answer);
             else setFinalPlayer3Input(msg.answer);
             if (msg.lockIn) setFinalLocks((l) => ({...l, answer: {...l.answer, [seat]: true}}));
             break;
@@ -1085,7 +1116,7 @@ export function useGameController() {
         if (msg.type === 'ROOM_FULL') {
           setP2PStatus('error');
           setP2PDetail(
-            'This room already has 3 players: the host device is Player 1 and two phones are P2 and P3. To play on this phone, open the game link (without scanning) and host from here instead.'
+            'This room already has 3 players. To play on this phone, open the game link on it (without scanning) and host from here instead.'
           );
           showToast('This room is full (3 players max).');
           p2pRef.current?.destroy();
@@ -1594,7 +1625,8 @@ export function useGameController() {
             return;
           } else if (
             deviceRole === 'HOST' &&
-            (activeClue.buzzedContestantId === 'player' || (activeClue.buzzedContestantId === 'player2' && !isClientConnected))
+            ((activeClue.buzzedContestantId === 'player' && hostPlays) ||
+              (activeClue.buzzedContestantId === 'player2' && !isClientConnected))
           ) {
             e.preventDefault();
             handleContestantSubmitAnswer(selectedAnswer, activeClue.buzzedContestantId as 'player' | 'player2');
@@ -1617,7 +1649,8 @@ export function useGameController() {
         return;
       }
 
-      // Host Local Keybindings
+      // Host Local Keybindings (none when Player 1 is on a phone)
+      if (!hostPlays) return;
       if (e.key === ' ' || e.key === 'a' || e.key === 'A') {
         e.preventDefault();
         handleContestantBuzz('player');
@@ -1631,7 +1664,7 @@ export function useGameController() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeClue, handleContestantBuzz, handleContestantSubmitAnswer, answerMode, isTwoPlayerMode, isClientConnected, deviceRole, mySeat]);
+  }, [activeClue, handleContestantBuzz, handleContestantSubmitAnswer, answerMode, isTwoPlayerMode, isClientConnected, deviceRole, mySeat, hostPlays]);
 
   // Check Round Completion & Transition (Host only)
   useEffect(() => {
@@ -1677,10 +1710,12 @@ export function useGameController() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceRole, currentRound, mySeat]);
 
-  // Host: a friend who dropped can't pick a tile, so Player 1 takes the board until they're back.
+  // Host: a friend who dropped can't pick a tile, so another player takes the board until they're back.
   useEffect(() => {
-    if (deviceRole === 'HOST' && player2Away && activeSelector === 'player2' && !activeClue) setActiveSelector('player');
-  }, [deviceRole, player2Away, activeSelector, activeClue]);
+    if (deviceRole !== 'HOST' || activeClue) return;
+    const away = (activeSelector === 'player2' && player2Away) || (activeSelector === 'player' && player1Away);
+    if (away && buzzerSeats[0]) setActiveSelector(buzzerSeats[0]);
+  }, [deviceRole, player2Away, player1Away, activeSelector, activeClue, buzzerSeats]);
 
   // Final Showdown Wager Confirmation (Host)
   const confirmFinalWagers = useCallback(() => {
@@ -1709,7 +1744,7 @@ export function useGameController() {
       },
       player: {
         ...c.player,
-        wager: c.player.sitsOutFinal ? 0 : playerFinalWager,
+        wager: player1Away || c.player.sitsOutFinal ? 0 : playerFinalWager,
       },
       player2: {
         ...c.player2,
@@ -1720,7 +1755,7 @@ export function useGameController() {
     setFinalShowdownPhase('CLUE');
     const reading = readAloud && finalClue ? readingSeconds(partsText(spokenFinal(finalClue)), 0, speechRate()) : 0;
     setFinalTimer(startCountdown(TIMES.final + reading, Date.now()));
-  }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, player2Away, isTwoPlayerMode, isClientConnected, readAloud, finalClue]);
+  }, [contestants, playerFinalWager, player2FinalWager, player3FinalWager, player3Human, player2Away, player1Away, isTwoPlayerMode, isClientConnected, readAloud, finalClue]);
 
   // Record every human player's result on this device's leaderboard. The celebration is for Player 1.
   const saveMatchToLeaderboard = useCallback(
@@ -1740,7 +1775,7 @@ export function useGameController() {
           tier,
           format,
           {
-            playerName: id === 'player' ? playerName || 'Champion' : c.name,
+            playerName: id === 'player' && hostPlays ? playerName || 'Champion' : c.name,
             score: finalScores[id],
             accuracy: attempts > 0 ? (c.correctCount / attempts) * 100 : 100,
             questionsAnswered: attempts,
@@ -1755,7 +1790,7 @@ export function useGameController() {
       }
       setLeaderboardRefreshCounter((c) => c + 1);
     },
-    [currentOpponentMode, difficulty, answerMode, gameLength, playerName, contestants, isTwoPlayerMode, isClientConnected, player3Human]
+    [currentOpponentMode, difficulty, answerMode, gameLength, playerName, contestants, isTwoPlayerMode, isClientConnected, player3Human, hostPlays]
   );
 
   // Final Showdown Resolution (Host)
@@ -1837,8 +1872,9 @@ export function useGameController() {
 
   // With friends on phones, the Final waits until each player has locked in (or the clock runs out).
   const allRemoteWagersLocked = onlineRemoteSeats.every((seat) => finalLocks.wager[seat]);
+  // A phone playing P1 is one of the online seats; otherwise P1 locks on this device.
   const allFinalAnswersLocked =
-    Boolean(finalLocks.answer.player) && onlineRemoteSeats.every((seat) => finalLocks.answer[seat]);
+    (!hostPlays || Boolean(finalLocks.answer.player)) && onlineRemoteSeats.every((seat) => finalLocks.answer[seat]);
   useEffect(() => {
     if (deviceRole !== 'HOST' || finalShowdownPhase !== 'CLUE' || onlineRemoteSeats.length === 0) return;
     if (allFinalAnswersLocked) finalizeFinalShowdownRef.current();
@@ -2037,6 +2073,8 @@ export function useGameController() {
     p2pRef,
     remoteSeats,
     mySeat,
+    hostPlays,
+    setHostPlays,
     player3Human,
     onlineRemoteSeats,
     finalLocks,

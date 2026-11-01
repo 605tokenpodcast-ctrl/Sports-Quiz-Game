@@ -17,6 +17,7 @@ export default function Scoreboard() {
     contestants,
     activeClue,
     openTagEditorModal,
+    hostPlays,
     activeContestantsList,
     openLeaderboardWithConfig,
   } = useGame();
@@ -67,11 +68,11 @@ export default function Scoreboard() {
                 {idx > 0 && <div className="w-px h-5 sm:h-6 bg-slate-800" />}
                 <div
                   onClick={() => {
-                    if (cid === 'player') openTagEditorModal();
+                    if (cid === 'player' && hostPlays) openTagEditorModal();
                   }}
-                  title={cid === 'player' ? 'Click to Edit Contestant Tag' : undefined}
+                  title={cid === 'player' && hostPlays ? 'Click to Edit Contestant Tag' : undefined}
                   className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 rounded-full transition-all ${
-                    cid === 'player' ? 'cursor-pointer hover:bg-amber-500/20' : ''
+                    cid === 'player' && hostPlays ? 'cursor-pointer hover:bg-amber-500/20' : ''
                   } ${
                     isBuzzed
                       ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-300 shadow-md animate-pulse'
@@ -111,7 +112,7 @@ export default function Scoreboard() {
                           : 'text-emerald-300'
                       }`}>
                       <span>{c.shortName}</span>
-                      {cid === 'player' && !isBuzzed && <Edit3 className="w-2 h-2 text-amber-400/70 ml-0.5" />}
+                      {cid === 'player' && hostPlays && !isBuzzed && <Edit3 className="w-2 h-2 text-amber-400/70 ml-0.5" />}
                       {isSelector && !isBuzzed && <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />}
                     </div>
                     <div

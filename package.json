@@ -15,7 +15,8 @@
     "test:game": "node tests/full-game.mjs",
     "test:length": "tsx tests/game-length.ts",
     "test:leaderboard": "tsx tests/leaderboard.ts",
-    "test:speech": "tsx tests/speech.ts && tsx tests/ai-voice.ts"
+    "test:speech": "tsx tests/speech.ts && tsx tests/ai-voice.ts",
+    "test:host-only": "node tests/host-only-game.mjs"
   },
   "keywords": [],
   "author": "",

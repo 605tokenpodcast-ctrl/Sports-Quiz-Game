@@ -45,6 +45,7 @@ export default function Stage() {
     finalizeFinalShowdown,
     allRemoteWagersLocked,
     activeContestantsList,
+    hostPlays,
   } = useGame();
   // Players at $0 or below sit out the Final Showdown.
   const sitsOut = (id: 'player' | 'player2' | 'analyst' | 'coach') => Boolean(contestants[id].sitsOutFinal);
@@ -74,8 +75,10 @@ export default function Stage() {
                       <Clock className="w-3 h-3" />
                       {aiThinkingStatus}
                     </span>
-                  ) : activeSelector === 'player' ? (
+                  ) : activeSelector === 'player' && hostPlays ? (
                     <span className="text-emerald-400 font-black">Your turn! Select any clue tile.</span>
+                  ) : activeSelector === 'player' ? (
+                    <span className="text-emerald-400 font-black">Player 1 is selecting on their device...</span>
                   ) : (isTwoPlayerMode || isClientConnected) && activeSelector === 'player2' ? (
                     <span className="text-emerald-400 font-black">
                       {isClientConnected ? 'Player 2 is selecting on their device...' : 'Player 2 turn! Select any clue tile.'}
@@ -110,7 +113,7 @@ export default function Stage() {
                     const isAnswered = answeredClueIds.has(clue.id);
                     const isAIPickingThis = aiPickingTile?.catIdx === catIdx && aiPickingTile?.clueIdx === rowIdx;
                     const canHumanPick =
-                      (activeSelector === 'player' || (isTwoPlayerMode && !isClientConnected && activeSelector === 'player2')) &&
+                      ((activeSelector === 'player' && hostPlays) || (isTwoPlayerMode && !isClientConnected && activeSelector === 'player2')) &&
                       !isAnswered &&
                       !activeClue;
 
@@ -165,8 +168,8 @@ export default function Stage() {
                   </p>
 
                   <div className="w-full max-w-sm flex flex-col gap-3">
-                    {/* Player 1 Wager Input */}
-                    {sitsOut('player') ? (
+                    {/* Player 1 Wager Input (a phone playing P1 is listed with the other phones) */}
+                    {!hostPlays ? null : sitsOut('player') ? (
                       <SitOutRow name={contestants.player.name} score={contestants.player.score} />
                     ) : (
                     <div className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/50">
@@ -284,7 +287,7 @@ export default function Stage() {
                   </div>
 
                   <div className="w-full max-w-md flex flex-col gap-2.5">
-                    {sitsOut('player') ? (
+                    {!hostPlays ? null : sitsOut('player') ? (
                       <div className="text-xs font-bold text-slate-400">
                         {contestants.player.name} sits out the Final (no money in the bank).
                       </div>
@@ -338,7 +341,7 @@ export default function Stage() {
                     {/* With friends on phones, Player 1 locks their own answer instead of ending the round for everyone */}
                     {onlineRemoteSeats.length > 0 ? (
                       <>
-                        {!sitsOut('player') && (
+                        {hostPlays && !sitsOut('player') && (
                         <button
                           onClick={() => setFinalLocks((l) => ({...l, answer: {...l.answer, player: true}}))}
                           disabled={Boolean(finalLocks.answer.player)}

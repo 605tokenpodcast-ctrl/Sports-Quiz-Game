@@ -43,7 +43,12 @@ export default function StartMenu() {
     aiVoice,
     setAiVoice,
     screenCount,
+    hostPlays,
+    setHostPlays,
   } = useGame();
+  const seatedPhones = Object.keys(remoteSeats).length;
+  // With the host not playing, P1 and P2 need phones before the game can start (Stats Riley can be P3).
+  const needsPhones = !hostPlays && seatedPhones < 2;
   return (
     <>
       {gameState.status === 'START' && (
@@ -102,6 +107,7 @@ export default function StartMenu() {
                     gameAudio.playCrispClick();
                     setIsTwoPlayerMode(false);
                     setIsClientConnected(false);
+                    setHostPlays(true);
                   }}
                   className={`min-w-[48px] min-h-[44px] py-1.5 px-2 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
                     !isTwoPlayerMode && !isClientConnected
@@ -123,7 +129,7 @@ export default function StartMenu() {
                       : 'bg-slate-950/80 text-emerald-300 border-emerald-600 hover:border-emerald-400'
                   }`}>
                   <Smartphone className="w-4 h-4" />
-                  <span>{isClientConnected ? `✓ ${Object.keys(remoteSeats).length + 1} Phones Linked` : 'Invite Phones (up to 3)'}</span>
+                  <span>{isClientConnected ? `✓ ${seatedPhones + (hostPlays ? 1 : 0)} Players Linked` : 'Invite Phones (up to 3)'}</span>
                 </button>
               </div>
               {Object.keys(remoteSeats).length > 0 && (
@@ -136,6 +142,28 @@ export default function StartMenu() {
                   {!player3Human && ' · Stats Riley (AI) plays the third seat'}
                 </div>
               )}
+              {/* A laptop on the stream can host without playing, so all three players use phones. */}
+              <label
+                className={`mt-2 flex items-start gap-2 text-[11px] leading-tight ${
+                  seatedPhones > 0 ? 'text-slate-500' : 'text-slate-300 cursor-pointer'
+                }`}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-amber-400"
+                  checked={!hostPlays}
+                  disabled={seatedPhones > 0}
+                  onChange={(e) => {
+                    gameAudio.playCrispClick();
+                    setHostPlays(!e.target.checked);
+                    if (e.target.checked) setIsTwoPlayerMode(false);
+                  }}
+                />
+                <span>
+                  <strong className="text-amber-300">This device only hosts.</strong> All 3 players use phones and the first
+                  phone to join is P1. Good for a laptop on the stream.
+                  {seatedPhones > 0 && ' (Set this before phones join.)'}
+                </span>
+              </label>
             </div>
 
             {/* AI Difficulty Selector */}
@@ -265,9 +293,10 @@ export default function StartMenu() {
               ref={startButtonRef}
               autoFocus
               onClick={startMatch}
-              className="min-w-[48px] min-h-[48px] w-full py-3 rounded-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 text-slate-950 font-black text-base shadow-xl transition-transform active:scale-95 flex items-center justify-center gap-2 mb-3">
+              disabled={needsPhones}
+              className="min-w-[48px] min-h-[48px] w-full py-3 rounded-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 text-slate-950 font-black text-base shadow-xl transition-transform active:scale-95 flex items-center justify-center gap-2 mb-3 disabled:opacity-50 disabled:cursor-wait">
               <Play className="w-5 h-5 fill-slate-950" />
-              ENTER THE ARENA
+              {needsPhones ? `WAITING FOR PHONES (${seatedPhones}/2+)` : 'ENTER THE ARENA'}
             </button>
 
             {/* Secondary Buttons: Leaderboards, Phone Duel, Rules */}
