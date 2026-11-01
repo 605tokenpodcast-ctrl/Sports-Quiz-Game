@@ -9,9 +9,11 @@ export type ContestantId = 'coach' | 'player' | 'analyst' | 'player2';
 export type DeviceRole = 'HOST' | 'CLIENT' | 'SCREEN';
 
 // Seats a friend's phone can take. The third seat is the AI analyst ("Stats Riley")
-// unless a second friend joins online, in which case that friend plays it as P3.
-export type RemoteSeat = 'player2' | 'analyst';
-export const REMOTE_SEATS: RemoteSeat[] = ['player2', 'analyst'];
+// unless a friend joins online to play it as P3. When the host device only hosts (a laptop
+// on the stream), phones take Player 1's seat too.
+export type RemoteSeat = 'player' | 'player2' | 'analyst';
+export const remoteSeatsFor = (hostPlays: boolean): RemoteSeat[] =>
+  hostPlays ? ['player2', 'analyst'] : ['player', 'player2', 'analyst'];
 export const seatLabel = (seat: ContestantId) => (seat === 'analyst' ? 'P3' : seat === 'player2' ? 'P2' : 'P1');
 
 // Typed and mic-only modes show no options and check the answer with fuzzy matching.

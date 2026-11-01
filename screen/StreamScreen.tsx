@@ -247,7 +247,7 @@ function Lobby() {
           </div>
         )}
         <div className="text-lg text-emerald-300 font-bold animate-pulse">
-          Waiting for {p2pStatus === 'connected' ? contestants.player.name : 'the host'} (Player 1) to start the game...
+          Waiting for the host to start the game...
         </div>
         <div className="text-base text-slate-400">
           The Start button is on the host device: the one that opened the game link first, not a phone that scanned this code.

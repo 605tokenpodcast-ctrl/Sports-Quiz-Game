@@ -22,6 +22,7 @@ export default function ClueCard() {
     handleContestantSubmitAnswer,
     activeContestantsList,
     dailyDoubleClock,
+    hostPlays,
   } = useGame();
   return (
     <>
@@ -129,7 +130,7 @@ export default function ClueCard() {
                   {maxDailyDoubleWager(roundMaxClue, contestants[activeClue.bonusSelectingPlayerId]?.score).toLocaleString()}
                 </div>
 
-                {activeClue.bonusSelectingPlayerId === 'player' || (!isClientConnected && activeClue.bonusSelectingPlayerId === 'player2') ? (
+                {(activeClue.bonusSelectingPlayerId === 'player' && hostPlays) || (!isClientConnected && activeClue.bonusSelectingPlayerId === 'player2') ? (
                   /* Human Wager Controls */
                   <div className="flex flex-wrap items-center justify-center gap-2 w-full">
                     <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-lg border-2 border-amber-400 shadow-inner">
@@ -220,7 +221,7 @@ export default function ClueCard() {
             {/* BUZZER RACE BUTTONS INSIDE CLUE CARD */}
             {!activeClue.isBonusWager && activeClue.phase === 'BUZZER_OPEN' && (
               <div className="w-full mb-2 flex flex-col sm:flex-row gap-2">
-                {!activeClue.buzzerLockout.player && (
+                {hostPlays && !activeClue.buzzerLockout.player && (
                   <button
                     onClick={() => handleContestantBuzz('player')}
                     className="flex-1 min-h-[56px] py-3 px-4 rounded-xl font-black text-sm sm:text-base tracking-wider flex items-center justify-center gap-2 shadow-xl bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 text-slate-950 hover:brightness-110 active:scale-95 border-2 border-white animate-pulse cursor-pointer">
@@ -241,7 +242,7 @@ export default function ClueCard() {
             )}
 
             {/* READING PHASE WAIT NOTICE */}
-            {!activeClue.isBonusWager && activeClue.phase === 'READING' && (
+            {hostPlays && !activeClue.isBonusWager && activeClue.phase === 'READING' && (
               <div className="w-full mb-2">
                 <button
                   onClick={() => handleContestantBuzz('player')}
@@ -255,7 +256,7 @@ export default function ClueCard() {
             {/* ANSWER CHOICES CONTAINER (Active only after Daily Double Wager is confirmed) */}
             {activeClue.phase === 'ANSWERING' &&
               (!activeClue.isBonusWager || activeClue.bonusWagerLocked) &&
-              (activeClue.buzzedContestantId === 'player' || (activeClue.buzzedContestantId === 'player2' && !isClientConnected)) && (
+              ((activeClue.buzzedContestantId === 'player' && hostPlays) || (activeClue.buzzedContestantId === 'player2' && !isClientConnected)) && (
                 <div className="w-full z-20">
                   {answerMode === 'VOICE' && isVoiceSupported ? (
                     <VoiceAnswerButton

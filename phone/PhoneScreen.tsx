@@ -112,7 +112,7 @@ export default function PhoneScreen() {
               <p className="text-xs text-slate-300">
                 {p2pStatus === 'error'
                   ? p2pDetail
-                  : 'You are locked in for the match! Waiting for the host (Player 1) to pick the settings and start the game.'}
+                  : 'You are locked in for the match! Waiting for the host to pick the settings and start the game.'}
               </p>
               <div className="text-[11px] text-emerald-400 font-bold bg-emerald-950/80 px-3 py-1.5 rounded-full border border-emerald-700 flex items-center gap-1.5">
                 <Wifi className="w-3.5 h-3.5" />
