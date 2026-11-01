@@ -21,14 +21,7 @@ import {
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
 import {
   answerLine,
-  getAiVoice,
-  getVoiceEngine,
   getVoiceSpeed,
-  prepareVoice,
-  setAiAllowed,
-  setAiVoice as setSpeechAiVoice,
-  setVoiceEngine as setSpeechEngine,
-  VoiceEngine,
   isSpeechSupported,
   setVoiceSpeed as setSpeechSpeed,
   speak,
@@ -215,17 +208,6 @@ export function useGameController() {
   const setVoiceSpeed = useCallback((s: VoiceSpeed) => {
     setSpeechSpeed(s);
     setVoiceSpeedState(s);
-  }, []);
-  // Device voice or the AI voice, and which AI voice. Also passed to the stream screen.
-  const [voiceEngine, setVoiceEngineState] = useState<VoiceEngine>(() => getVoiceEngine());
-  const setVoiceEngine = useCallback((e: VoiceEngine) => {
-    setSpeechEngine(e);
-    setVoiceEngineState(e);
-  }, []);
-  const [aiVoice, setAiVoiceState] = useState<string>(() => getAiVoice());
-  const setAiVoice = useCallback((v: string) => {
-    setSpeechAiVoice(v);
-    setAiVoiceState(v);
   }, []);
 
   // Core Game State
@@ -1149,14 +1131,6 @@ export function useGameController() {
             setSpeechSpeed(s.voiceSpeed, false);
             setVoiceSpeedState(s.voiceSpeed);
           }
-          if (s.voiceEngine && s.voiceEngine !== getVoiceEngine()) {
-            setSpeechEngine(s.voiceEngine, false);
-            setVoiceEngineState(s.voiceEngine);
-          }
-          if (s.aiVoice) {
-            setSpeechAiVoice(s.aiVoice, false);
-            setAiVoiceState(s.aiVoice);
-          }
           if (s.gameLength) setGameLength(s.gameLength);
           if (s.lineup) setSyncedLineup(s.lineup);
           if (s.bigPlay !== undefined) setBigPlay(s.bigPlay);
@@ -1261,12 +1235,10 @@ export function useGameController() {
         seats: remoteSeats,
         readAloud,
         voiceSpeed,
-        voiceEngine,
-        aiVoice,
         gameLength,
       },
     });
-  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats, readAloud, voiceSpeed, voiceEngine, aiVoice, gameLength, screenCount]);
+  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats, readAloud, voiceSpeed, gameLength, screenCount]);
 
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
@@ -1545,14 +1517,6 @@ export function useGameController() {
   // Reading aloud happens on one device: the stream screen if one is watching, otherwise the host.
   const speaksHere =
     readAloud && isSpeechSupported && (deviceRole === 'SCREEN' || (deviceRole === 'HOST' && screenCount === 0));
-
-  // Only a stream screen may run the AI voice; on a phone it's too heavy to share with the game.
-  useEffect(() => setAiAllowed(deviceRole === 'SCREEN'), [deviceRole]);
-
-  // Start downloading the AI voice on the reading device as soon as it's needed.
-  useEffect(() => {
-    if (speaksHere && voiceEngine === 'ai') prepareVoice();
-  }, [speaksHere, voiceEngine]);
 
   // Host: once the clue has been read, the buzzers light up a moment later instead of waiting
   // out the estimated reading time.
@@ -2095,10 +2059,6 @@ export function useGameController() {
     setReadAloud,
     voiceSpeed,
     setVoiceSpeed,
-    voiceEngine,
-    setVoiceEngine,
-    aiVoice,
-    setAiVoice,
     screenCount,
     streamScreenUrl,
     greenScreenUrl,

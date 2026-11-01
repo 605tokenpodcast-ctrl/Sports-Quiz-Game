@@ -25,10 +25,6 @@ export default function GameMenu() {
     setReadAloud,
     voiceSpeed,
     setVoiceSpeed,
-    voiceEngine,
-    setVoiceEngine,
-    aiVoice,
-    setAiVoice,
     screenCount,
   } = useGame();
   return (
@@ -109,10 +105,6 @@ export default function GameMenu() {
                   <VoiceSettings
                   voiceSpeed={voiceSpeed}
                   setVoiceSpeed={setVoiceSpeed}
-                  voiceEngine={voiceEngine}
-                  setVoiceEngine={setVoiceEngine}
-                  aiVoice={aiVoice}
-                  setAiVoice={setAiVoice}
                   speaksElsewhere={screenCount > 0}
                 />
                 </div>

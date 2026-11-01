@@ -38,10 +38,6 @@ export default function StartMenu() {
     setReadAloud,
     voiceSpeed,
     setVoiceSpeed,
-    voiceEngine,
-    setVoiceEngine,
-    aiVoice,
-    setAiVoice,
     screenCount,
     hostPlays,
     setHostPlays,
@@ -279,10 +275,6 @@ export default function StartMenu() {
                 <VoiceSettings
                   voiceSpeed={voiceSpeed}
                   setVoiceSpeed={setVoiceSpeed}
-                  voiceEngine={voiceEngine}
-                  setVoiceEngine={setVoiceEngine}
-                  aiVoice={aiVoice}
-                  setAiVoice={setAiVoice}
                   speaksElsewhere={screenCount > 0}
                 />
               </div>

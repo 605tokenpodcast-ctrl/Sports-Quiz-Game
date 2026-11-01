@@ -1,6 +1,6 @@
 // Picking the host voice and splitting clues for reading aloud.
 import assert from 'node:assert/strict';
-import {answerLine, splitSentences, voiceScore} from '../utils/speech';
+import {answerLine, splitSentences, spokenText, spokenYear, voiceScore} from '../utils/speech';
 
 let failed = 0;
 const check = (name: string, fn: () => void) => {
@@ -64,6 +64,32 @@ check('long clues are read a sentence at a time, short bits stay attached', () =
 
 check('answer lines name the answer', () => {
   for (const pick of [0, 0.4, 0.9]) assert.ok(answerLine('Tom Brady', pick).includes('Tom Brady'));
+});
+
+check('years are read as years', () => {
+  assert.equal(spokenYear(1998), 'nineteen ninety-eight');
+  assert.equal(spokenYear(2000), 'two thousand');
+  assert.equal(spokenYear(2005), 'two thousand five');
+  assert.equal(spokenYear(2024), 'twenty twenty-four');
+  assert.equal(spokenYear(1905), 'nineteen oh five');
+  assert.equal(spokenText('the 1993 draft'), 'the nineteen ninety-three draft');
+  assert.equal(spokenText('ran for 1600 yards'), 'ran for 1600 yards', 'counts stay numbers');
+});
+
+check('St. is Saint before a name and State after a school', () => {
+  assert.equal(spokenText('beat the St. Louis Rams'), 'beat the Saint Louis Rams');
+  assert.equal(spokenText('Amon-Ra St. Brown'), 'Amon-Ra Saint Brown');
+  assert.equal(spokenText('Fresno St. receiver'), 'Fresno State receiver');
+  assert.equal(spokenText('played at Ohio St.'), 'played at Ohio State');
+});
+
+check('names, picks, scores, records and Super Bowls read naturally', () => {
+  assert.equal(spokenText('Michael Penix Jr. and Steve Smith Sr.'), 'Michael Penix Junior and Steve Smith Senior');
+  assert.equal(spokenText('Kenneth Walker III'), 'Kenneth Walker the third');
+  assert.equal(spokenText('the No. 1 pick'), 'the number 1 pick');
+  assert.equal(spokenText('won 23-16 in Super Bowl XXXIV'), 'won 23 to 16 in Super Bowl 34');
+  assert.equal(spokenText('this team went 13-3 under Jeff Fisher'), 'this team went 13 and 3 under Jeff Fisher');
+  assert.equal(spokenText('a 10-6-1 record'), 'a 10 and 6 and 1 record');
 });
 
 if (failed) {
