@@ -46,7 +46,13 @@ export default function Stage() {
     allRemoteWagersLocked,
     activeContestantsList,
     hostPlays,
+    categoryIntro,
+    skipCategoryIntro,
+    finalReveal,
+    finalShownFor,
   } = useGame();
+  // During the category reveal, columns not yet revealed show a blank header.
+  const hiddenColumn = (catIdx: number) => Boolean(categoryIntro && catIdx >= categoryIntro.shown);
   // Players at $0 or below sit out the Final Showdown.
   const sitsOut = (id: 'player' | 'player2' | 'analyst' | 'coach') => Boolean(contestants[id].sitsOutFinal);
   const nobodyPlays = activeContestantsList.every(sitsOut);
@@ -70,7 +76,11 @@ export default function Stage() {
                 </div>
 
                 <div className="text-slate-300">
-                  {aiThinkingStatus ? (
+                  {categoryIntro ? (
+                    <button onClick={skipCategoryIntro} className="text-amber-300 font-black underline underline-offset-2">
+                      Revealing the categories... Skip
+                    </button>
+                  ) : aiThinkingStatus ? (
                     <span className="text-amber-400 animate-pulse flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {aiThinkingStatus}
@@ -93,12 +103,14 @@ export default function Stage() {
 
               {/* Category Headers */}
               <div className={`grid ${boardColsClass} gap-1 sm:gap-1.5 text-center`}>
-                {(currentRound === 'ROUND_1' ? round1Board : round2Board).map((cat) => (
+                {(currentRound === 'ROUND_1' ? round1Board : round2Board).map((cat, catIdx) => (
                   <div
                     key={cat.title}
-                    className="bg-gradient-to-b from-blue-900 to-slate-900 border border-blue-600 rounded-md p-1 sm:p-1.5 shadow-md flex items-center justify-center min-h-[52px] sm:min-h-[44px]">
-                    <span className="text-[8px] sm:text-[11px] md:text-xs font-black tracking-tight text-amber-300 line-clamp-4 sm:line-clamp-2 uppercase leading-tight break-words hyphens-auto" title={cat.title}>
-                      {cat.title}
+                    className={`bg-gradient-to-b from-blue-900 to-slate-900 border rounded-md p-1 sm:p-1.5 shadow-md flex items-center justify-center min-h-[52px] sm:min-h-[44px] ${
+                      categoryIntro && catIdx === categoryIntro.shown - 1 ? 'border-amber-300 ring-2 ring-amber-300/70' : 'border-blue-600'
+                    }`}>
+                    <span className="text-[8px] sm:text-[11px] md:text-xs font-black tracking-tight text-amber-300 line-clamp-4 sm:line-clamp-2 uppercase leading-tight break-words hyphens-auto" title={hiddenColumn(catIdx) ? '' : cat.title}>
+                      {hiddenColumn(catIdx) ? '' : cat.title}
                     </span>
                   </div>
                 ))}
@@ -373,7 +385,13 @@ export default function Stage() {
               {finalShowdownPhase === 'RESULTS' && (
                 <div className="w-full flex flex-col items-center gap-3">
                   <div className="text-xs sm:text-sm text-slate-300 font-medium mb-1">
-                    Correct Answer was: <strong className="text-amber-400">{finalClue?.correctAnswer}</strong>
+                    {finalReveal ? (
+                      <span className="text-amber-300 animate-pulse">Revealing the answers...</span>
+                    ) : (
+                      <>
+                        Correct Answer was: <strong className="text-amber-400">{finalClue?.correctAnswer}</strong>
+                      </>
+                    )}
                   </div>
 
                   <div className="w-full grid grid-cols-3 gap-2">
@@ -385,6 +403,14 @@ export default function Stage() {
                             <div className="text-[9px] sm:text-[10px] font-bold uppercase">{c.name}</div>
                             <div className="text-[11px] sm:text-xs font-semibold my-1">Sat out</div>
                             <div className="text-xs font-black">$0</div>
+                          </div>
+                        );
+                      }
+                      if (!finalShownFor(id)) {
+                        return (
+                          <div key={id} className="p-2 sm:p-3 rounded-lg border bg-blue-950/80 border-blue-600 text-blue-200">
+                            <div className="text-[9px] sm:text-[10px] font-bold uppercase">{c.name}</div>
+                            <div className="text-lg font-black my-1">?</div>
                           </div>
                         );
                       }

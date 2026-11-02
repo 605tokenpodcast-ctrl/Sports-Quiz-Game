@@ -75,6 +75,21 @@ honks a horn, P3 (or Stats Riley) chirps and Coach Dave blows a whistle.
 After the game, **Share Recap Card** makes a 1080 x 1350 image with the final standings and
 best moments, for social posts. Phones open the share sheet; computers download it.
 
+## Game show touches
+
+- **Category reveal:** with Read Clues Aloud on, each round opens by revealing its columns one at a
+  time while the voice reads them, so listeners know the board. The host can tap Skip.
+- **Fair buzzer:** buzzing before the light locks you out for a quarter second, as on TV. Phones
+  are timed from the moment they showed the light, so the host's own player gets no network head start.
+- **Hot streaks:** three right answers in a row put a flame on that player's podium, and the voice
+  calls it out.
+- **AI opponents** miss more on harder clues. Coach Dave is best on coaches and big games, Stats Riley
+  on stats and players.
+- **Final reveal:** answers and wagers are revealed one player at a time, lowest score first.
+- **Season standings:** every finished game adds to a running table on the host device (wins, games,
+  total money, best score, Finals right). It shows on the leaderboard, the results and the stream
+  screen. **Start new season** on the leaderboard clears it.
+
 ## Final Showdown
 
 Like on TV, only players with money in the bank play the Final Showdown. Anyone at $0 or

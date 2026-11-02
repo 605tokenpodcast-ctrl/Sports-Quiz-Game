@@ -1,6 +1,7 @@
 // Pieces used by more than one screen: images, music, name tag ideas, the QR code and Final choices.
 import {useMemo} from 'react';
 import {generateQRCodeMatrix} from '../utils/qrCode';
+import type {SeasonRow} from '../utils/season';
 
 export const IMG_STUDIO = 'assets/images/bg_studio_arena.png';
 export const IMG_TROPHY = 'assets/images/icon_trophy_gold.png';
@@ -105,6 +106,42 @@ export function FinalChoices({
           <span className="line-clamp-2 flex-1">{opt}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/** The podcast season standings table. `big` is the stream screen's larger type. */
+export function SeasonTable({rows, big = false}: {rows: SeasonRow[]; big?: boolean}) {
+  if (!rows.length) return null;
+  const cell = big ? 'px-3 py-2 text-xl lg:text-2xl' : 'px-2 py-1 text-[11px] sm:text-xs';
+  return (
+    <div className="w-full overflow-x-auto">
+      <table className="w-full border-collapse text-left">
+        <thead>
+          <tr className={`text-amber-300 uppercase font-black ${big ? 'text-base lg:text-lg' : 'text-[10px]'}`}>
+            <th className={cell}>#</th>
+            <th className={cell}>Player</th>
+            <th className={`${cell} text-right`}>Wins</th>
+            <th className={`${cell} text-right`}>Games</th>
+            <th className={`${cell} text-right`}>Total $</th>
+            <th className={`${cell} text-right`}>Best</th>
+            <th className={`${cell} text-right`}>Finals</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.name} className={`border-t border-slate-800 font-bold ${i === 0 ? 'text-amber-200' : 'text-slate-200'}`}>
+              <td className={cell}>{i + 1}</td>
+              <td className={`${cell} font-black`}>{r.name}</td>
+              <td className={`${cell} text-right`}>{r.wins}</td>
+              <td className={`${cell} text-right`}>{r.games}</td>
+              <td className={`${cell} text-right font-mono`}>${r.money.toLocaleString()}</td>
+              <td className={`${cell} text-right font-mono`}>${r.bestScore.toLocaleString()}</td>
+              <td className={`${cell} text-right`}>{r.finalsPlayed ? `${r.finalsRight}/${r.finalsPlayed}` : '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

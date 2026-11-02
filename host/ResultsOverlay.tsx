@@ -2,7 +2,7 @@
 import {RotateCw, Trophy, Edit3, Share2} from 'lucide-react';
 import {MenuOverlay} from '../utils/helper';
 import {AnswerFormat, TriviaTier} from '../utils/leaderboard';
-import {IMG_TROPHY} from '../ui/shared';
+import {IMG_TROPHY, SeasonTable} from '../ui/shared';
 import {useGame} from '../game/GameContext';
 
 export default function ResultsOverlay() {
@@ -22,6 +22,7 @@ export default function ResultsOverlay() {
     recapMomentsList,
     recapAwardsList,
     shareRecap,
+    seasonRows,
   } = useGame();
   return (
     <>
@@ -64,6 +65,13 @@ export default function ResultsOverlay() {
                 ? 'You dominated the podium and clinched the championship title!'
                 : 'Great match! One of the competitors edged ahead in the final standings.'}
             </p>
+
+            {seasonRows.length > 0 && (
+              <div className="w-full bg-slate-950/90 border border-amber-500/40 rounded-xl p-2 mb-2.5 text-left">
+                <div className="text-[10px] font-bold text-amber-300 uppercase tracking-wider mb-1 text-center">Season standings</div>
+                <SeasonTable rows={seasonRows.slice(0, 5)} />
+              </div>
+            )}
 
             {/* Score Breakdown Card */}
             <div className="w-full bg-slate-950/90 border border-blue-800 rounded-xl p-3 mb-2.5 text-left">

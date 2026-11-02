@@ -21,6 +21,8 @@ export interface QuestionClue {
   sport: SportTag;
   difficulty: number; // 1 to 5
   isBonusWager?: boolean;
+  /** The id of the category it came from (nfl_super_bowl ...). */
+  categoryId?: string;
   /**
    * Everyone this clue is about, normalized: the answer when it's a person, plus any player
    * named in the clue. A game never asks two clues about the same person, so one clue can't
@@ -32,6 +34,8 @@ export interface QuestionClue {
 export interface TriviaCategory {
   id: string;
   title: string;
+  /** One line on what the column is about, read out when the round's categories are revealed. */
+  description?: string;
   sport: SportTag;
   clues: QuestionClue[];
 }
@@ -370,6 +374,7 @@ export function getAllCompiledCategories(): TriviaCategory[] {
       clues.push({
         id,
         category: spec.title.toUpperCase(),
+        categoryId: spec.id,
         value: raw.difficulty * 200,
         clue: sanitizeQuestionClue(raw.clue),
         correctAnswer: cleanAnswer,
@@ -390,6 +395,7 @@ export function getAllCompiledCategories(): TriviaCategory[] {
     result.push({
       id: spec.id,
       title: spec.title,
+      description: spec.description,
       sport: spec.sport,
       clues,
     });
@@ -662,7 +668,7 @@ export function generateBoardForRound(
       markQuestionsSeen(ladderClues.map((c) => c.id));
       usedCategoryIds.add(cat.id);
       familiesOnBoard.add(family);
-      selectedBoard.push({id: cat.id, title: cat.title, sport: cat.sport, clues: ladderClues});
+      selectedBoard.push({id: cat.id, title: cat.title, description: cat.description, sport: cat.sport, clues: ladderClues});
     }
   }
 
