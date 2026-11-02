@@ -269,14 +269,22 @@ export function useGameController() {
 
   // NFL question bank, built weekly from nflverse data
   const [bankInfo, setBankInfo] = useState<ExternalBankInfo | null>(null);
+  // A game can't start until the bank is in: the built-in questions only fill half a Round 1
+  // board and no Round 2 board at all.
+  const [bankStatus, setBankStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const loadBank = useCallback(() => {
+    setBankStatus('loading');
+    loadExternalQuestionBank().then((info) => {
+      if (info) setBankInfo(info);
+      setBankStatus(info ? 'ready' : 'failed');
+    });
+  }, []);
 
   // Only the host deals questions. Phones and the stream screen never load the bank, which
   // saves them a 1.4 MB download and the work of preparing 4,000 questions as they join.
   useEffect(() => {
     if (deviceRole !== 'HOST' || bankInfo) return;
-    loadExternalQuestionBank().then((info) => {
-      if (info) setBankInfo(info);
-    });
+    loadBank();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceRole]);
 
@@ -770,6 +778,7 @@ export function useGameController() {
 
   // Initialize and start match
   const startMatch = useCallback(() => {
+    if (bankStatus !== 'ready') return;
     gameAudio.playConfirmSelect();
     initializeBoards();
     setCurrentRound('ROUND_1');
@@ -860,7 +869,7 @@ export function useGameController() {
     setIsInviteModalOpen(false);
     setIsLeaderboardOpen(false);
     setIsTagEditorOpen(false);
-  }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human, readAloud, hostPlays]);
+  }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human, readAloud, hostPlays, bankStatus]);
 
   // Buzzer races. With friends on phones, buzzes are collected for a moment and the earliest
   // press wins, counting each phone's network delay, so the host's own phone has no head start.
@@ -1788,13 +1797,15 @@ export function useGameController() {
     const allClueIds = board.flatMap((cat) => cat.clues.map((c) => c.id));
     const answeredCount = allClueIds.filter((id) => answeredClueIds.has(id)).length;
 
-    if (currentRound === 'ROUND_1' && answeredCount >= allClueIds.length) {
+    // A round with no board (it should never happen) goes straight to the Final instead of
+    // leaving everyone waiting on a board that isn't there.
+    if (currentRound === 'ROUND_1' && answeredCount >= allClueIds.length && round2Board.length) {
       gameAudio.playLevelUpStinger();
       setCurrentRound('CHAMPIONSHIP');
       const sortedContestants = [...buzzerSeats];
       sortedContestants.sort((a, b) => contestants[a].score - contestants[b].score);
       setActiveSelector(sortedContestants[0]);
-    } else if (currentRound === 'CHAMPIONSHIP' && answeredCount >= allClueIds.length) {
+    } else if (currentRound !== 'FINAL_SHOWDOWN' && answeredCount >= allClueIds.length) {
       gameAudio.playPowerupChime();
       setCurrentRound('FINAL_SHOWDOWN');
       setFinalShowdownPhase('WAGER');
@@ -2216,6 +2227,8 @@ export function useGameController() {
     boardColsClass,
     boardRowIndexes,
     bankInfo,
+    bankStatus,
+    loadBank,
     seenQuestionsCount,
     totalQuestionCount,
     totalCategoryCount,
