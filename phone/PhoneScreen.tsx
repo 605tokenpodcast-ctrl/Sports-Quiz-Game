@@ -3,12 +3,14 @@ import React from 'react';
 import {Trophy, Zap, Clock, Flame, Star, Smartphone, Wifi, Gamepad2, ArrowLeft, Lock, Share2} from 'lucide-react';
 import TimeLeft from '../utils/TimeLeft';
 import {ContestantId, isOpenAnswerMode, seatLabel} from '../game/types';
-import {maxDailyDoubleWager, maxFinalWager} from '../game/rules';
+import {maxDailyDoubleWager, maxFinalWager, EARLY_BUZZ_LOCKOUT_MS} from '../game/rules';
 import VoiceAnswerButton, {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {FinalChoices} from '../ui/shared';
 import {useGame} from '../game/GameContext';
 
 export default function PhoneScreen() {
+  // Shows "Too early!" for a moment after a buzz before the light.
+  const [tooEarly, setTooEarly] = React.useState(false);
   const {
     setDeviceRole,
     roomCode,
@@ -155,13 +157,25 @@ export default function PhoneScreen() {
                 </div>
               </div>
 
-              {/* A. Reading Phase -> Lock indicator */}
+              {/* A. Reading Phase -> the buzzer is live but early. Tapping now locks this phone out
+                  for a moment (as on TV), so waiting for the light beats tapping over and over. */}
               {!activeClue.isBonusWager && activeClue.phase === 'READING' && (
-                <div className="w-full py-8 px-4 rounded-2xl bg-rose-950/70 border-2 border-rose-600 text-center flex flex-col items-center gap-2 animate-pulse">
-                  <Clock className="w-8 h-8 text-rose-400" />
-                  <span className="text-sm font-black text-rose-200">WAIT FOR HOST LIGHT TO BUZZ</span>
-                  <span className="text-xs text-rose-400 font-mono">Buzzer opens in <TimeLeft c={activeClue} />s</span>
-                </div>
+                <button
+                  onClick={() => {
+                    if (tooEarly) return;
+                    p2pRef.current?.send({type: 'CLIENT_BUZZ', contestantId: mySeat, timestamp: Date.now()});
+                    setTooEarly(true);
+                    window.setTimeout(() => setTooEarly(false), EARLY_BUZZ_LOCKOUT_MS + 150);
+                  }}
+                  className={`w-full min-h-[140px] py-8 px-4 rounded-3xl border-2 text-center flex flex-col items-center justify-center gap-2 transition-colors ${
+                    tooEarly ? 'bg-rose-700 border-rose-300' : 'bg-rose-950/70 border-rose-600'
+                  }`}>
+                  <Clock className="w-8 h-8 text-rose-300" />
+                  <span className="text-sm font-black text-rose-100">{tooEarly ? 'TOO EARLY!' : 'WAIT FOR THE LIGHT'}</span>
+                  <span className="text-xs text-rose-300 font-mono">
+                    {tooEarly ? 'Buzzing early locks you out for a moment' : <>Buzzer opens in <TimeLeft c={activeClue} />s</>}
+                  </span>
+                </button>
               )}
 
               {/* B. Buzzer Open Phase -> GIANT BUZZER BUTTON */}
