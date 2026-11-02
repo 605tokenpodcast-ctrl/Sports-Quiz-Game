@@ -52,6 +52,10 @@ async function loadCsvIfExists(file: string, url: string): Promise<Row[]> {
   }
 }
 
+// Stadiums whose newest name in the source data is wrong (it lists the Texans' 2026 games at
+// "Reliant Stadium", the name before 2014).
+const STADIUM_NAME_NOW: Record<string, string> = { HOU00: 'NRG Stadium' };
+
 // Known spelling mistakes in the source data.
 const NAME_FIXES: Record<string, string> = { 'Klint Kubliak': 'Klint Kubiak' };
 
@@ -319,6 +323,14 @@ async function main() {
   ]);
   const statsBySeason = new Map<number, Row[]>();
   seasonStats.forEach((rows, i) => statsBySeason.set(1999 + i, rows));
+  // Season rosters for every finished season since 1980 (linemen included), used to find the
+  // team each player spent most of his career with.
+  const ROSTER_FROM = 1980;
+  const pastRosters = await Promise.all(
+    Array.from({ length: lastComplete - ROSTER_FROM + 1 }, (_, i) =>
+      loadCsvIfExists(`roster_${ROSTER_FROM + i}.csv`, `${RELEASES}/rosters/roster_${ROSTER_FROM + i}.csv`)
+    )
+  );
 
   const name = (g: Row, side: 'home' | 'away') => teamName(g[`${side}_team`], num(g.season));
   const stadiumGames = new Map<string, number>();
@@ -715,24 +727,33 @@ async function main() {
         pickDistractors(team, [], allTeamsNow, `coacht${code}`), 2, teamAliases(team));
     }
 
-    const homeCounts = new Map<string, Map<string, number>>();
-    for (const g of played.filter((g) => num(g.season) >= cs - 1 && g.location === 'Home' && g.stadium)) {
-      const m = homeCounts.get(g.stadium) ?? new Map();
-      m.set(g.home_team, (m.get(g.home_team) ?? 0) + 1);
-      homeCounts.set(g.stadium, m);
+    // Grouped by stadium id, because one building shows up under old and new names. The
+    // newest name is the answer and older names still count as right.
+    const homeGames = played
+      .filter((g) => num(g.season) >= cs - 1 && g.location === 'Home' && g.stadium)
+      .sort((a, b) => a.gameday.localeCompare(b.gameday));
+    const venues = new Map<string, { tenants: Map<string, number>; names: string[]; roof: string }>();
+    for (const g of homeGames) {
+      const id = g.stadium_id || g.stadium;
+      const v = venues.get(id) ?? { tenants: new Map<string, number>(), names: [], roof: '' };
+      v.tenants.set(g.home_team, (v.tenants.get(g.home_team) ?? 0) + 1);
+      v.names = [...v.names.filter((n) => n !== g.stadium), g.stadium]; // newest last
+      if (g.roof) v.roof = g.roof;
+      venues.set(id, v);
     }
+    const venueName = (id: string, v: { names: string[] }) => STADIUM_NAME_NOW[id] ?? v.names[v.names.length - 1];
     const stadiumCat = category('stadiums', "There's No Place Like Home", 'Which team plays where.');
-    const stadiumNames = [...homeCounts.keys()];
-    for (const [stadium, m] of homeCounts) {
-      const tenants = [...m.entries()].filter(([, n]) => n >= 3);
+    const stadiumNames = [...venues].map(([id, v]) => venueName(id, v));
+    for (const [id, v] of venues) {
+      const tenants = [...v.tenants.entries()].filter(([, n]) => n >= 3);
       if (tenants.length !== 1) continue; // skip shared stadiums like MetLife
+      const stadium = venueName(id, v);
       const team = teamName(tenants[0][0], cs);
-      const roof = played.find((g) => g.stadium === stadium && g.roof)?.roof;
-      const roofHint = roof === 'dome' ? 'under a dome ' : roof === 'outdoors' ? 'outdoors ' : '';
+      const roofHint = v.roof === 'dome' ? 'under a dome ' : v.roof === 'outdoors' ? 'outdoors ' : '';
       add(stadiumCat, `stadium_${stadium}_${tenants[0][0]}`, `This team plays its home games ${roofHint}at ${stadium}.`, team,
         pickDistractors(team, [], allTeamsNow, `st${stadium}`), 2, teamAliases(team));
       add(stadiumCat, `stadiumq_${stadium}_${tenants[0][0]}`, `The ${team} call this stadium home.`, stadium,
-        pickDistractors(stadium, [], stadiumNames, `stq${stadium}`), 3);
+        pickDistractors(stadium, [], stadiumNames, `stq${stadium}`), 3, [...new Set([stadium, ...v.names])]);
     }
 
     // Star players this season: their team and jersey number.
@@ -746,7 +767,9 @@ async function main() {
       if (!r || !r.team) continue;
       const team = teamName(r.team, cs);
       const jersey = num(r.jersey_number);
-      const college = r.college && r.college !== 'NA' ? `, who played college ball at ${r.college},` : '';
+      // Transfers are listed newest first ("LSU; Ohio State" for Joe Burrow): name that school only.
+      const school = (r.college || '').split(';').map((c) => c.trim()).filter((c) => c && c !== 'NA')[0];
+      const college = school ? `, who played college ball at ${school},` : '';
       add(playersCat, `team_${cs}_${p.player_id}_${r.team}`, `${posWord(r.position).replace(/^./, (c) => c.toUpperCase())} ${p.player_display_name}${college} suits up for this team in ${cs}.`, team,
         pickDistractors(team, [], allTeamsNow, `pt${p.player_id}`), 1, teamAliases(team));
       if (!isNaN(jersey)) {
@@ -799,23 +822,30 @@ async function main() {
   );
   const teamsByYear = (y: number) => [...new Set(picksBy(y).map((d) => teamName(d.team, y)))];
 
-  // The team each player spent the most seasons with (1999 on), for "starred for the Saints" hints.
+  // The team each player spent the most seasons with, from season rosters since 1980, for
+  // "made his name with the Saints" hints. A season on two teams counts for both.
   const seasonsWith = new Map<string, Map<string, number>>();
-  for (const [s, rows] of statsBySeason) {
-    if (s === currentSeason && s !== lastComplete) continue;
+  const rosterSeen = new Set<string>();
+  pastRosters.forEach((rows, i) => {
+    const s = ROSTER_FROM + i;
     for (const r of rows) {
-      if (!r.player_id || !r.recent_team) continue;
-      const m = seasonsWith.get(r.player_id) ?? new Map<string, number>();
+      if (!r.gsis_id || !r.team) continue;
       let team = '';
-      try { team = teamName(r.recent_team, s); } catch { continue; }
-      m.set(nickname(team), (m.get(nickname(team)) ?? 0) + 1);
-      seasonsWith.set(r.player_id, m);
+      try { team = nickname(teamName(r.team, s)); } catch { continue; }
+      const key = `${r.gsis_id}|${s}|${team}`;
+      if (rosterSeen.has(key)) continue;
+      rosterSeen.add(key);
+      const m = seasonsWith.get(r.gsis_id) ?? new Map<string, number>();
+      m.set(team, (m.get(team) ?? 0) + 1);
+      seasonsWith.set(r.gsis_id, m);
     }
-  }
+  });
   const mainTeam = (d: Row) => {
     const m = d.gsis_id ? seasonsWith.get(d.gsis_id) : undefined;
-    const best = m && [...m.entries()].sort((a, b) => b[1] - a[1])[0];
-    return best && best[1] >= 4 ? best[0] : '';
+    const ranked = m ? [...m.entries()].sort((a, b) => b[1] - a[1]) : [];
+    const best = ranked[0];
+    // Only name a team he clearly made his name with: 4+ seasons and more than any other team.
+    return best && best[1] >= 4 && (!ranked[1] || best[1] > ranked[1][1]) ? best[0] : '';
   };
 
   const whoCat = category('who_am_i', 'Who Am I?', 'Guess the star from the clues: college, draft slot and what he did in the NFL.');
@@ -877,7 +907,10 @@ async function main() {
   // ---- Trades of notable players ------------------------------------------
   const notableById = new Map(notable.filter((d) => d.pfr_player_id).map((d) => [d.pfr_player_id, d]));
   const tradeCat = category('blockbuster_trades', 'Trade Winds', 'Where big-name players landed in trades.');
-  for (const t of trades.filter((t) => t.pfr_id && notableById.has(t.pfr_id) && t.pfr_name)) {
+  // Rows with a pick_season are draft picks that changed hands; the player named is whoever was
+  // later picked with them, not someone who was traded. Only players traded as players count.
+  const playerTrades = trades.filter((t) => !t.pick_season && !t.pick_round && t.pfr_id && notableById.has(t.pfr_id) && t.pfr_name);
+  for (const t of playerTrades) {
     const y = num(t.season);
     const to = teamName(t.received, y), from = teamName(t.gave, y);
     const d = notableById.get(t.pfr_id)!;

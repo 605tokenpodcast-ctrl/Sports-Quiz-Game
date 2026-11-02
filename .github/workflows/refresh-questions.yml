@@ -20,6 +20,8 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npm run questions
+      # Stop here, before publishing, if the new bank has wrong or broken questions.
+      - run: npm run test:bank
       - name: Commit updated questions
         run: |
           git config user.name "github-actions[bot]"
