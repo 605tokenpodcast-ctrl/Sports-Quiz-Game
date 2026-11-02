@@ -58,12 +58,12 @@ export default function PhoneScreen() {
     const isClueObscured = Boolean(activeClue?.isBonusWager && !activeClue.bonusWagerLocked);
 
     return (
-      <div className="fixed inset-0 overflow-y-auto bg-slate-950 text-white font-sans flex flex-col justify-between p-3 sm:p-4 select-none touch-manipulation">
+      <div className="fixed inset-0 overflow-y-auto bg-slate-950 text-white font-sans flex flex-col justify-between p-3 sm:p-4 short:p-2 select-none touch-manipulation">
         {/* Background Atmosphere */}
         <div className="absolute inset-0 z-0 bg-gradient-to-t from-slate-950 via-slate-900 to-blue-950 opacity-90 pointer-events-none" />
 
         {/* Client Top Header Status */}
-        <header className="relative z-10 w-full bg-slate-900/95 border border-amber-500/60 rounded-xl p-2.5 shadow-lg flex items-center justify-between gap-2">
+        <header className="relative z-10 w-full bg-slate-900/95 border border-amber-500/60 rounded-xl p-2.5 short:py-1 shadow-lg flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-amber-500 flex items-center justify-center text-slate-950 font-black shadow">
               <Gamepad2 className="w-5 h-5" />
@@ -102,7 +102,7 @@ export default function PhoneScreen() {
         </header>
 
         {/* Client Main Body: Dynamic Gamepad Controls */}
-        <main className="relative z-10 flex-1 my-3 flex flex-col justify-center items-center w-full max-w-lg mx-auto">
+        <main className="relative z-10 flex-1 my-3 short:my-1.5 flex flex-col justify-center items-center w-full max-w-lg mx-auto">
           {/* 1. If Match has not started or in Start Screen */}
           {gameState.status === 'START' && (
             <div className="w-full bg-slate-900/90 border border-amber-500/50 rounded-2xl p-5 text-center flex flex-col items-center gap-3">
