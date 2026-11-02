@@ -20,7 +20,8 @@
     "test:options": "tsx tests/answer-options.ts",
     "test:bank": "tsx tests/question-bank.ts",
     "test:season": "tsx tests/season.ts",
-    "test:host-only": "node tests/host-only-game.mjs"
+    "test:host-only": "node tests/host-only-game.mjs",
+    "test:phone-fit": "node tests/phone-fit.mjs"
   },
   "keywords": [],
   "author": "",

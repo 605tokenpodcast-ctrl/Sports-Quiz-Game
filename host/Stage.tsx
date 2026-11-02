@@ -1,4 +1,5 @@
 // The main stage: the clue board, or the Final Showdown wager, clue and results.
+import type React from 'react';
 import {Zap, CheckCircle2, Clock, Flame, Star, Edit3} from 'lucide-react';
 import TimeLeft from '../utils/TimeLeft';
 import {maxFinalWager} from '../game/rules';
@@ -57,14 +58,16 @@ export default function Stage() {
   const sitsOut = (id: 'player' | 'player2' | 'analyst' | 'coach') => Boolean(contestants[id].sitsOutFinal);
   const nobodyPlays = activeContestantsList.every(sitsOut);
   const aiSitters = activeContestantsList.filter((id) => sitsOut(id) && (id === 'coach' || (id === 'analyst' && !player3Human)));
+  // A short game has 5 wide columns, so its labels and dollar values can be bigger on a phone.
+  const shortBoard = boardColsClass === 'grid-cols-5';
   return (
     <>
-      <main className="relative z-10 flex-1 w-full min-h-0 flex flex-col justify-between overflow-hidden p-2 sm:p-4">
+      <main className="relative z-10 flex-1 w-full min-h-0 flex flex-col justify-between overflow-hidden p-2 sm:p-4 short:p-1.5">
         {/* UPPER ARENA: Trivia Board or Final Showdown View */}
         <div className="flex-1 w-full min-h-0 flex flex-col items-center justify-center">
           {currentRound !== 'FINAL_SHOWDOWN' ? (
             /* TRIVIA BOARD (6 Categories x 5 Clues, or 5 x 3 in a short game) */
-            <div className="w-full max-w-6xl h-full flex flex-col justify-center gap-1 sm:gap-2">
+            <div className="w-full max-w-6xl h-full flex flex-col justify-center gap-1 sm:gap-2 short:gap-1">
               {/* Turn Banner / AI Picking Status */}
               <div className="w-full flex items-center justify-between px-2 py-0.5 bg-slate-900/80 border border-blue-800/60 rounded-md text-[10px] sm:text-xs font-bold">
                 <div className="flex items-center gap-1.5 text-amber-300">
@@ -106,18 +109,22 @@ export default function Stage() {
                 {(currentRound === 'ROUND_1' ? round1Board : round2Board).map((cat, catIdx) => (
                   <div
                     key={cat.title}
-                    className={`bg-gradient-to-b from-blue-900 to-slate-900 border rounded-md p-1 sm:p-1.5 shadow-md flex items-center justify-center min-h-[52px] sm:min-h-[44px] ${
+                    className={`bg-gradient-to-b from-blue-900 to-slate-900 border rounded-md p-1 sm:p-1.5 shadow-md flex items-center justify-center min-h-[52px] sm:min-h-[44px] short:min-h-[30px] ${
                       categoryIntro && catIdx === categoryIntro.shown - 1 ? 'border-amber-300 ring-2 ring-amber-300/70' : 'border-blue-600'
                     }`}>
-                    <span className="text-[8px] sm:text-[11px] md:text-xs font-black tracking-tight text-amber-300 line-clamp-4 sm:line-clamp-2 uppercase leading-tight break-words hyphens-auto" title={hiddenColumn(catIdx) ? '' : cat.title}>
+                    <span className={`${shortBoard ? 'text-[10px]' : 'text-[8px]'} sm:text-[11px] md:text-xs short:text-[10px] font-black tracking-tight text-amber-300 line-clamp-4 sm:line-clamp-2 uppercase leading-tight break-words hyphens-auto`} title={hiddenColumn(catIdx) ? '' : cat.title}>
                       {hiddenColumn(catIdx) ? '' : cat.title}
                     </span>
                   </div>
                 ))}
               </div>
 
-              {/* Clue Dollar Tiles Grid (one column per category, one row per clue value) */}
-              <div className={`grid ${boardColsClass} gap-1 sm:gap-1.5 flex-1 min-h-0`}>
+              {/* Clue Dollar Tiles Grid (one column per category, one row per clue value). Rows share
+                  the space left over, so the board never runs under the podiums; on an upright phone
+                  each row stops at 7rem tall so a 3-row short board isn't a wall of skinny towers. */}
+              <div
+                className={`grid ${boardColsClass} gap-1 sm:gap-1.5 flex-1 min-h-0 [@media(max-width:639px)]:max-h-[calc(var(--rows)*7rem)]`}
+                style={{gridTemplateRows: `repeat(${boardRowIndexes.length}, minmax(0, 1fr))`, '--rows': boardRowIndexes.length} as React.CSSProperties}>
                 {boardRowIndexes.map((rowIdx) =>
                   (currentRound === 'ROUND_1' ? round1Board : round2Board).map((cat, catIdx) => {
                     const clue = cat.clues[rowIdx];
@@ -134,7 +141,7 @@ export default function Stage() {
                         key={clue.id}
                         disabled={isAnswered || Boolean(activeClue) || !canHumanPick}
                         onClick={() => canHumanPick && selectClue(catIdx, rowIdx, activeSelector)}
-                        className={`w-full h-full min-h-[40px] rounded-lg border flex flex-col items-center justify-center transition-all ${
+                        className={`w-full h-full min-h-0 rounded-lg border flex flex-col items-center justify-center transition-all ${
                           isAnswered
                             ? 'bg-slate-950/60 border-slate-800/80 text-slate-700 cursor-not-allowed'
                             : isAIPickingThis
@@ -144,7 +151,7 @@ export default function Stage() {
                             : 'bg-gradient-to-b from-slate-900 to-blue-950 border-blue-900 text-blue-300/80 cursor-wait'
                         }`}>
                         {!isAnswered ? (
-                          <div className="flex items-center gap-0.5 text-xs sm:text-base md:text-xl font-black drop-shadow-md">
+                          <div className={`flex items-center gap-0.5 ${shortBoard ? 'text-base xs:text-lg' : 'text-sm'} sm:text-base md:text-xl short:text-base font-black drop-shadow-md`}>
                             <span className="text-amber-300">$</span>
                             <span>{clue.value}</span>
                           </div>
@@ -438,7 +445,7 @@ export default function Stage() {
         </div>
 
         {/* LOWER ARENA: Sleek Modern TV Game-Show Stage Podiums (Clean Nameplates + Digital LED Scores + Buzz Lightbars) */}
-        <div className="relative z-10 w-full shrink-0 pt-1 pb-1 flex items-end justify-center gap-2 sm:gap-4 md:gap-8 max-w-4xl mx-auto">
+        <div className="relative z-10 w-full shrink-0 pt-1 pb-1 short:pt-0.5 short:pb-0 flex items-end justify-center gap-2 sm:gap-4 md:gap-8 max-w-4xl mx-auto">
           {activeContestantsList.map((cid) => {
             const c = contestants[cid];
             const isPlayer = cid === 'player';
@@ -469,7 +476,7 @@ export default function Stage() {
                 }`}>
                 {/* 1. Buzzer Indicator Lightbar Strip */}
                 <div
-                  className={`w-full h-1.5 sm:h-2 transition-colors flex items-center justify-center ${
+                  className={`w-full h-1.5 sm:h-2 short:h-1 transition-colors flex items-center justify-center ${
                     isBuzzed
                       ? 'bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,1)] animate-pulse'
                       : isCorrect
@@ -488,7 +495,7 @@ export default function Stage() {
 
                 {/* 2. Podium Nameplate Section */}
                 <div
-                  className={`px-2 py-1 flex items-center justify-between gap-1 border-b ${
+                  className={`px-2 py-1 short:py-0.5 flex items-center justify-between gap-1 border-b ${
                     isBuzzed
                       ? 'bg-amber-400/20 border-amber-400/50'
                       : 'bg-slate-950/80 border-slate-800'
@@ -520,7 +527,7 @@ export default function Stage() {
                 </div>
 
                 {/* 3. Digital LED Podium Score Counter Screen */}
-                <div className="px-2 py-1 sm:py-1.5 bg-slate-950/90 flex flex-col items-center justify-center">
+                <div className="px-2 py-1 sm:py-1.5 short:py-0.5 bg-slate-950/90 flex flex-col items-center justify-center">
                   <div
                     className={`font-mono font-black text-xs sm:text-base md:text-lg tracking-tight ${
                       isBuzzed
@@ -533,7 +540,7 @@ export default function Stage() {
                   </div>
 
                   {/* Active Status Pill */}
-                  <div className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-wide truncate">
+                  <div className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-wide truncate short:hidden">
                     {isBuzzed
                       ? '⚡ BUZZED IN'
                       : isCorrect

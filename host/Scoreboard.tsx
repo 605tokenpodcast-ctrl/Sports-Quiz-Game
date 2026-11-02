@@ -24,10 +24,10 @@ export default function Scoreboard() {
   } = useGame();
   return (
     <>
-      <header className="relative z-20 w-full bg-slate-900/95 border-b border-blue-800/80 shadow-lg px-2 sm:px-4 py-2 flex items-center justify-between gap-2 shrink-0">
+      <header className="relative z-20 w-full bg-slate-900/95 border-b border-blue-800/80 shadow-lg px-2 sm:px-4 py-2 short:py-1 flex items-center justify-between gap-2 shrink-0">
         {/* Left: Show Logo & Round Badge */}
         <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-md border border-amber-300">
+          <div className="hidden sm:flex w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 items-center justify-center shadow-md border border-amber-300">
             <Trophy className="w-4 h-4 sm:w-5 sm:h-5 text-slate-950" />
           </div>
           <div className="hidden xs:block">
@@ -42,7 +42,7 @@ export default function Scoreboard() {
                   : 'FINAL SHOWDOWN'}
               </span>
             </div>
-            <div className="text-[9px] sm:text-[10px] text-slate-400 hidden sm:block">
+            <div className="text-[9px] sm:text-[10px] text-slate-400 hidden sm:block short:hidden">
               Difficulty: <span className="text-white font-bold">{difficulty}</span> | Format:{' '}
               <span className="text-white font-bold">{answerMode}</span>
               {(isTwoPlayerMode || isClientConnected) && (
@@ -55,7 +55,7 @@ export default function Scoreboard() {
         </div>
 
         {/* Center: Live Bankroll Scoreboard with Sleek Broadcast Digital Badges */}
-        <div className="flex items-center gap-1 sm:gap-2 bg-slate-950/90 px-2 sm:px-3 py-1 rounded-full border border-blue-900/70 shadow-inner">
+        <div className="flex items-center gap-1 sm:gap-2 bg-slate-950/90 px-1 sm:px-3 py-1 rounded-full min-w-0 border border-blue-900/70 shadow-inner">
           {activeContestantsList.map((cid, idx) => {
             const c = contestants[cid];
             const isSelector = activeSelector === cid && !activeClue && currentRound !== 'FINAL_SHOWDOWN';
@@ -72,7 +72,7 @@ export default function Scoreboard() {
                     if (cid === 'player' && hostPlays) openTagEditorModal();
                   }}
                   title={cid === 'player' && hostPlays ? 'Click to Edit Contestant Tag' : undefined}
-                  className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 rounded-full transition-all ${
+                  className={`flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-1 rounded-full min-w-0 transition-all ${
                     cid === 'player' && hostPlays ? 'cursor-pointer hover:bg-amber-500/20' : ''
                   } ${
                     isBuzzed
@@ -140,7 +140,7 @@ export default function Scoreboard() {
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={() => openLeaderboardWithConfig()}
-            className="min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] px-2 sm:px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/80 flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md"
+            className="hidden sm:flex min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] px-2 sm:px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/80 items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md"
             title="All Leaderboards">
             <Trophy className="w-4 h-4 text-amber-400" />
             <span className="text-xs font-black hidden xl:inline">LEADERBOARDS</span>

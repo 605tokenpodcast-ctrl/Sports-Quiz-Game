@@ -28,9 +28,9 @@ export default function ClueCard() {
     <>
       {activeClue && (
         <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto touch-auto">
-          <div className="w-full max-w-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-blue-950 border-2 border-amber-400 rounded-2xl p-3 sm:p-5 shadow-2xl flex flex-col items-center text-center my-auto max-h-[94vh] overflow-y-auto">
+          <div className="w-full max-w-2xl bg-gradient-to-b from-slate-900 via-slate-900 to-blue-950 border-2 border-amber-400 rounded-2xl p-3 sm:p-5 short:p-2 shadow-2xl flex flex-col items-center text-center my-auto max-h-[94vh] overflow-y-auto">
             {/* Header: Clue Category, Value & Contestant Status Badges */}
-            <div className="w-full flex items-center justify-between border-b border-blue-800/80 pb-2 mb-2">
+            <div className="w-full flex items-center justify-between border-b border-blue-800/80 pb-2 mb-2 short:pb-1 short:mb-1">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs sm:text-sm font-black text-amber-400 tracking-wider uppercase text-left">
                   {activeClue.clue.category}
@@ -69,7 +69,7 @@ export default function ClueCard() {
             </div>
 
             {/* Countdown / Status Light Bar */}
-            <div className="w-full flex items-center justify-center gap-2 mb-2">
+            <div className="w-full flex items-center justify-center gap-2 mb-2 short:mb-1">
               {activeClue.isBonusWager && !activeClue.bonusWagerLocked && (
                 <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-xs font-black animate-pulse">
                   <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
@@ -110,8 +110,8 @@ export default function ClueCard() {
                 </p>
               </div>
             ) : (
-              <div className="w-full bg-slate-950/90 border border-blue-900/80 rounded-xl p-3 sm:p-5 mb-3 transition-all duration-300">
-                <p className="text-sm sm:lg md:text-xl font-semibold text-slate-100 leading-relaxed drop-shadow-sm">
+              <div className="w-full bg-slate-950/90 border border-blue-900/80 rounded-xl p-3 sm:p-5 short:p-2 mb-3 short:mb-1.5 transition-all duration-300">
+                <p className="text-sm sm:text-lg md:text-xl short:text-sm font-semibold text-slate-100 leading-relaxed drop-shadow-sm">
                   {activeClue.clue.clue}
                 </p>
               </div>
@@ -214,7 +214,7 @@ export default function ClueCard() {
             )}
 
             {/* FEEDBACK / STATUS TEXT */}
-            <div className="text-xs sm:text-sm font-bold text-amber-300 mb-3 min-h-[20px]">
+            <div className="text-xs sm:text-sm font-bold text-amber-300 mb-3 short:mb-1 min-h-[20px] short:min-h-0">
               {activeClue.feedbackText}
             </div>
 
@@ -274,7 +274,7 @@ export default function ClueCard() {
                   <>
                   {!isOpenAnswerMode(answerMode) ? (
                     <div className="w-full flex flex-col gap-1.5">
-                      <div className="text-[10px] sm:text-xs text-amber-300 font-bold uppercase tracking-wider flex items-center justify-between px-1">
+                      <div className="text-[10px] sm:text-xs text-amber-300 font-bold uppercase tracking-wider hidden sm:flex short:hidden items-center justify-between px-1">
                         <span>Select or Press [A-H] / [1-8]:</span>
                         <span className="text-slate-400 font-normal">
                           {activeClue.options.length}-Choice Format
@@ -292,7 +292,7 @@ export default function ClueCard() {
                             <button
                               key={`${opt}-${idx}`}
                               onClick={() => handleContestantSubmitAnswer(opt, activeClue.buzzedContestantId as 'player' | 'player2')}
-                              className="min-h-[48px] sm:min-h-[52px] p-2.5 rounded-xl bg-gradient-to-b from-blue-900 to-blue-950 hover:from-blue-800 hover:to-blue-900 text-slate-100 hover:text-amber-300 border-2 border-blue-600 hover:border-amber-400 font-bold text-xs sm:text-sm transition-all active:scale-95 text-left shadow-md hover:shadow-amber-500/20 flex items-center gap-2 cursor-pointer leading-tight group">
+                              className="min-h-[48px] sm:min-h-[52px] short:min-h-[40px] p-2.5 short:p-1.5 rounded-xl bg-gradient-to-b from-blue-900 to-blue-950 hover:from-blue-800 hover:to-blue-900 text-slate-100 hover:text-amber-300 border-2 border-blue-600 hover:border-amber-400 font-bold text-xs sm:text-sm transition-all active:scale-95 text-left shadow-md hover:shadow-amber-500/20 flex items-center gap-2 cursor-pointer leading-tight group">
                               <span className="w-6 h-6 rounded-lg bg-blue-950 border border-amber-400/80 group-hover:bg-amber-400 group-hover:text-slate-950 text-amber-300 font-black text-xs flex items-center justify-center shrink-0 shadow-inner">
                                 {letterLabel}
                               </span>
