@@ -645,13 +645,35 @@ export function generateBoardForRound(
   return selectedBoard;
 }
 
+/**
+ * Categories whose hard clues make a good Final Showdown: big games, legends and famous
+ * seasons. Draft rounds, colleges, jersey numbers and trades are left out because a Final
+ * like "Round 4" or "Idaho St." ends the game flat.
+ */
+export const FINAL_CATEGORY_IDS = new Set([
+  'nfl_super_bowl',
+  'nfl_super_bowl_details',
+  'nfl_conference_title',
+  'nfl_records',
+  'nfl_number_one_picks',
+  'nfl_who_am_i',
+  'nfl_passing_leaders',
+  'nfl_rushing_leaders',
+  'nfl_receiving_leaders',
+  'nfl_records_legends',
+  'nfl_franchises_stadiums',
+]);
+
 export function getChampionshipFinalClues(): QuestionClue[] {
-  const allCategories = getActiveCategories();
+  const allCategories = getActiveCategories().filter((c) => FINAL_CATEGORY_IDS.has(c.id));
   const clues: QuestionClue[] = [];
 
   allCategories.forEach((cat) => {
     cat.clues.forEach((q) => {
-      if (q.difficulty >= 4) {
+      // Stadium names make poor Finals: hard to spell and easy to half-know.
+      // Numbers and scores ("13", "24-10") make poor Finals too: a near miss is still wrong.
+      const kind = answerKind(q.correctAnswer);
+      if (q.difficulty >= 4 && !/in this stadium/i.test(q.clue) && kind !== 'number' && kind !== 'score' && kind !== 'year') {
         clues.push({
           ...q,
           value: 0,

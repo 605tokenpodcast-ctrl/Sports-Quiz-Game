@@ -50,6 +50,138 @@ const RAW_FINAL_SHOWDOWN_QUESTIONS: QuestionClue[] = [
     sport: 'NFL',
     difficulty: 5,
   },
+  {
+    id: 'final_nfl_music_city',
+    category: 'FAMOUS FINISHES',
+    value: 0,
+    clue: "In the January 2000 Wild Card round, the Tennessee Titans won the \"Music City Miracle\" on a kickoff-return lateral against this team.",
+    correctAnswer: 'Buffalo Bills',
+    distractors: ["Jacksonville Jaguars", "Indianapolis Colts", "Miami Dolphins", "Baltimore Ravens", "Pittsburgh Steelers", "New York Jets", "Kansas City Chiefs"],
+    aliases: ["bills", "buffalo", "buffalo bills"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_immaculate',
+    category: 'FAMOUS FINISHES',
+    value: 0,
+    clue: "This Steelers rookie running back scooped up a deflected pass and ran it in for the \"Immaculate Reception\" against the Raiders in 1972.",
+    correctAnswer: 'Franco Harris',
+    distractors: ["Rocky Bleier", "Lynn Swann", "John Stallworth", "Terry Bradshaw", "Jack Lambert", "Mike Webster", "Frenchy Fuqua"],
+    aliases: ["franco harris", "harris", "franco"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_helmet_catch',
+    category: 'FAMOUS FINISHES',
+    value: 0,
+    clue: "In Super Bowl XLII, this Giants receiver pinned an Eli Manning pass against his helmet to keep the game-winning drive alive.",
+    correctAnswer: 'David Tyree',
+    distractors: ["Plaxico Burress", "Amani Toomer", "Steve Smith", "Kevin Boss", "Jeremy Shockey", "Mario Manningham", "Brandon Jacobs"],
+    aliases: ["david tyree", "tyree"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_the_catch',
+    category: 'FAMOUS FINISHES',
+    value: 0,
+    clue: "Joe Montana's pass to this receiver in the 1981 NFC Championship Game became known simply as \"The Catch.\"",
+    correctAnswer: 'Dwight Clark',
+    distractors: ["Jerry Rice", "Freddie Solomon", "Roger Craig", "John Taylor", "Russ Francis", "Earl Cooper", "Ronnie Lott"],
+    aliases: ["dwight clark", "clark"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_minneapolis',
+    category: 'FAMOUS FINISHES',
+    value: 0,
+    clue: "This Vikings receiver caught the last-play, 61-yard \"Minneapolis Miracle\" touchdown to beat the Saints in the January 2018 playoffs.",
+    correctAnswer: 'Stefon Diggs',
+    distractors: ["Adam Thielen", "Kyle Rudolph", "Jarius Wright", "Laquon Treadwell", "Cordarrelle Patterson", "Jerick McKinnon", "Latavius Murray"],
+    aliases: ["stefon diggs", "diggs"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_philly_special',
+    category: 'FAMOUS FINISHES',
+    value: 0,
+    clue: "On the \"Philly Special\" trick play in Super Bowl LII, this Eagles quarterback caught a touchdown pass.",
+    correctAnswer: 'Nick Foles',
+    distractors: ["Carson Wentz", "Nate Sudfeld", "Jalen Hurts", "Michael Vick", "Donovan McNabb", "Sam Bradford", "Mark Sanchez"],
+    aliases: ["nick foles", "foles"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_28_3',
+    category: 'EPIC COLLAPSES',
+    value: 0,
+    clue: "This team led the Patriots 28-3 in the third quarter of Super Bowl LI and lost in overtime.",
+    correctAnswer: 'Atlanta Falcons',
+    distractors: ["Seattle Seahawks", "Carolina Panthers", "Los Angeles Rams", "Philadelphia Eagles", "New York Giants", "Kansas City Chiefs", "San Francisco 49ers"],
+    aliases: ["falcons", "atlanta", "atlanta falcons"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_home_sb',
+    category: 'SUPER BOWL FIRSTS',
+    value: 0,
+    clue: "After the 2020 season, this team became the first to win a Super Bowl in its own home stadium.",
+    correctAnswer: 'Tampa Bay Buccaneers',
+    distractors: ["Los Angeles Rams", "Kansas City Chiefs", "Miami Dolphins", "New Orleans Saints", "Green Bay Packers", "San Francisco 49ers", "Houston Texans"],
+    aliases: ["buccaneers", "bucs", "tampa bay", "tampa bay buccaneers"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_0_16',
+    category: 'FEAST OR FAMINE',
+    value: 0,
+    clue: "In 2008, this team became the first in NFL history to finish a season 0-16.",
+    correctAnswer: 'Detroit Lions',
+    distractors: ["Cleveland Browns", "St. Louis Rams", "Oakland Raiders", "Kansas City Chiefs", "Miami Dolphins", "Houston Texans", "Cincinnati Bengals"],
+    aliases: ["lions", "detroit", "detroit lions"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_shula',
+    category: 'SIDELINE LEGENDS',
+    value: 0,
+    clue: "With 347 wins including the playoffs, this coach holds the NFL record for career victories.",
+    correctAnswer: 'Don Shula',
+    distractors: ["Bill Belichick", "George Halas", "Tom Landry", "Curly Lambeau", "Andy Reid", "Paul Brown", "Chuck Noll"],
+    aliases: ["don shula", "shula"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_pass_td',
+    category: 'CHAMPIONSHIP IMMORTALS',
+    value: 0,
+    clue: "This quarterback retired with 649 regular-season touchdown passes, the most in NFL history.",
+    correctAnswer: 'Tom Brady',
+    distractors: ["Drew Brees", "Peyton Manning", "Brett Favre", "Aaron Rodgers", "Philip Rivers", "Dan Marino", "Ben Roethlisberger"],
+    aliases: ["tom brady", "brady"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
+  {
+    id: 'final_nfl_guarantee',
+    category: 'SUPER BOWL FIRSTS',
+    value: 0,
+    clue: "Before Super Bowl III, this Jets quarterback guaranteed a win over the heavily favored Baltimore Colts.",
+    correctAnswer: 'Joe Namath',
+    distractors: ["Johnny Unitas", "Earl Morrall", "Len Dawson", "Bart Starr", "Daryle Lamonica", "Fran Tarkenton", "Bob Griese"],
+    aliases: ["joe namath", "namath", "broadway joe"],
+    sport: 'NFL',
+    difficulty: 5,
+  },
 ];
 
 export const FINAL_SHOWDOWN_QUESTIONS: QuestionClue[] = RAW_FINAL_SHOWDOWN_QUESTIONS.map((q) => ({
@@ -122,8 +254,13 @@ export function getFreshFinalShowdownClue(
       !usedAnswers.has(normalizeAnswer(q.correctAnswer))
   );
 
+  // The hand-written Finals are the best ones, so they come up about a third of the time
+  // while this device still has some it hasn't seen.
+  const handWritten = candidates.filter((q) => q.id.startsWith('final_'));
   const pool =
-    candidates.length > 0
+    handWritten.length > 0 && Math.random() < 0.35
+      ? handWritten
+      : candidates.length > 0
       ? candidates
       : fallbackCandidates.length > 0
       ? fallbackCandidates
