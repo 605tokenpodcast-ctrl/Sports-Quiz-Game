@@ -13,6 +13,8 @@ import {
   generateSmartDistractors,
   getActiveCategories,
   getChampionshipFinalClues,
+  clueOverlaps,
+  markClueUsed,
   getSeenQuestionsCount,
   getSeenQuestionIds,
   markQuestionSeen,
@@ -210,9 +212,10 @@ export function getCategoriesForRound(
   usedAnswers: Set<string>,
   gameLength: GameLength = 'FULL'
 ): TriviaCategory[] {
+  // The board doesn't depend on the AI difficulty: tile values set each clue's difficulty.
+  void difficulty;
   return generateBoardForRound(
     round,
-    difficulty,
     categoryCount,
     usedCategoryIds,
     usedQuestionIds,
@@ -241,18 +244,9 @@ export function getFreshFinalShowdownClue(
   const finalPool = byId.size > 0 ? [...byId.values()] : FINAL_SHOWDOWN_QUESTIONS;
 
   // Strict check: Question ID not in session, AND normalized answer not in usedAnswers
-  const candidates = finalPool.filter(
-    (q) =>
-      !usedQuestionIds.has(q.id) &&
-      !usedAnswers.has(normalizeAnswer(q.correctAnswer)) &&
-      !seen.has(q.id)
-  );
-
-  const fallbackCandidates = finalPool.filter(
-    (q) =>
-      !usedQuestionIds.has(q.id) &&
-      !usedAnswers.has(normalizeAnswer(q.correctAnswer))
-  );
+  // Not used this game, and not about anyone already asked about.
+  const candidates = finalPool.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers) && !seen.has(q.id));
+  const fallbackCandidates = finalPool.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers));
 
   // The hand-written Finals are the best ones, so they come up about a third of the time
   // while this device still has some it hasn't seen.
@@ -269,7 +263,7 @@ export function getFreshFinalShowdownClue(
   const picked = pool[Math.floor(Math.random() * pool.length)];
 
   usedQuestionIds.add(picked.id);
-  usedAnswers.add(normalizeAnswer(picked.correctAnswer));
+  markClueUsed(picked, usedAnswers);
   markQuestionSeen(picked.id);
   return picked;
 }

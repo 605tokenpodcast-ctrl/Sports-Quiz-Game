@@ -78,6 +78,8 @@ import {
   trackAnswer,
   startCountdown,
   TIMES,
+  EARLY_BUZZ_LOCKOUT_MS,
+  inEarlyBuzzLockout,
 } from './rules';
 import {
   AnswerFormat,
@@ -858,11 +860,16 @@ export function useGameController() {
   const awardBuzzRef = useRef(awardBuzz);
   awardBuzzRef.current = awardBuzz;
 
+  // Early buzzes on the open clue: when each player's short lockout ends.
+  const earlyBuzzRef = useRef<{clueId: string; until: Partial<Record<ContestantId, number>>}>({clueId: '', until: {}});
+
   /** Any contestant buzzing in, human or AI. `pressedAt` is when they pressed, on the host's clock. */
   const registerBuzz = (contestantId: ContestantId, pressedAt: number) => {
     const current = activeClueRef.current;
     if (!current || current.phase !== 'BUZZER_OPEN' || current.buzzedContestantId || current.buzzerLockout[contestantId]) return;
     const clueId = current.clue.id;
+    const early = earlyBuzzRef.current;
+    if (early.clueId === clueId && inEarlyBuzzLockout(pressedAt, early.until[contestantId])) return;
 
     // Everyone on this device: first come, first served.
     if (Object.keys(remoteSeatsRef.current).length === 0) {
@@ -890,9 +897,12 @@ export function useGameController() {
   const handleContestantBuzz = (contestantId: 'player' | RemoteSeat, pressedAt = Date.now()) => {
     if (!activeClue) return;
 
-    // Early buzz penalty during READING phase
+    // Buzzing before the light: an error sound and a short lockout, as on TV.
     if (activeClue.phase === 'READING') {
       gameAudio.playErrorBuzz();
+      const early = earlyBuzzRef.current;
+      if (early.clueId !== activeClue.clue.id) earlyBuzzRef.current = {clueId: activeClue.clue.id, until: {}};
+      earlyBuzzRef.current.until[contestantId] = pressedAt + EARLY_BUZZ_LOCKOUT_MS;
       return;
     }
 

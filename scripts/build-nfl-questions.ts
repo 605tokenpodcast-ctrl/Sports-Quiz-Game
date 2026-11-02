@@ -756,27 +756,21 @@ async function main() {
         pickDistractors(stadium, [], stadiumNames, `stq${stadium}`), 3, [...new Set([stadium, ...v.names])]);
     }
 
-    // Star players this season: their team and jersey number.
+    // Star players this season: which team they play for.
     const seasonRows = statsBySeason.get(cs) ?? [];
     const stars = [...seasonRows].sort((a, b) => num(b.fantasy_points_ppr) - num(a.fantasy_points_ppr)).slice(0, 80);
     const latestWeek = Math.max(0, ...rosters.map((r) => num(r.week)).filter((n) => !isNaN(n)));
     const rosterNow = new Map(rosters.filter((r) => num(r.week) === latestWeek).map((r) => [r.gsis_id, r]));
-    const playersCat = category('stars_now', 'Stars of Today', 'Teams and jersey numbers of the league\'s top players this season.');
+    const playersCat = category('stars_now', 'Stars of Today', 'Which team the league\'s top players suit up for this season.');
     for (const p of stars) {
       const r = rosterNow.get(p.player_id);
       if (!r || !r.team) continue;
       const team = teamName(r.team, cs);
-      const jersey = num(r.jersey_number);
       // Transfers are listed newest first ("LSU; Ohio State" for Joe Burrow): name that school only.
       const school = (r.college || '').split(';').map((c) => c.trim()).filter((c) => c && c !== 'NA')[0];
       const college = school ? `, who played college ball at ${school},` : '';
       add(playersCat, `team_${cs}_${p.player_id}_${r.team}`, `${posWord(r.position).replace(/^./, (c) => c.toUpperCase())} ${p.player_display_name}${college} suits up for this team in ${cs}.`, team,
         pickDistractors(team, [], allTeamsNow, `pt${p.player_id}`), 1, teamAliases(team));
-      if (!isNaN(jersey)) {
-        const nums = [jersey + 1, jersey - 1, jersey + 10, jersey - 10, jersey + 2, jersey + 5, jersey - 5].filter((n) => n > 0 && n < 100).map(String);
-        add(playersCat, `jersey_${cs}_${p.player_id}_${jersey}`, `The jersey number worn by ${team} ${posWord(r.position)} ${p.player_display_name}.`, String(jersey),
-          pickDistractors(String(jersey), nums, [], `pj${p.player_id}`), 4);
-      }
     }
   }
 

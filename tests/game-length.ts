@@ -38,8 +38,19 @@ for (const length of ['FULL', 'SHORT'] as const) {
     if (seasonAnswers >= want.r2.length) {
       assert.ok(s.round2Board.some((c) => c.id === T.CURRENT_CATEGORY_IDS.ROUND_2), `${length} round 2 has the season so far`);
     }
+    // Board variety: one column per family, and a big-game or famous-season column every round.
+    for (const board of [s.round1Board, s.round2Board]) {
+      const families = board.map((c) => T.categoryFamily(c.id));
+      assert.equal(new Set(families).size, families.length, `${length} board repeats a family: ${board.map((c) => c.id)}`);
+      assert.ok(board.some((c) => T.STORY_CATEGORY_IDS.has(c.id)), `${length} board has a story column`);
+    }
+    // Nobody is asked about twice, so one clue can't give away another's answer.
+    const clues = [...s.round1Board, ...s.round2Board].flatMap((c) => c.clues).concat(s.finalClue);
+    const people = clues.flatMap((q) => [...new Set([T.normalizeAnswer(q.correctAnswer), ...(q.subjects ?? [])])]);
+    const repeat = people.find((p, i) => people.indexOf(p) !== i);
+    assert.equal(repeat, undefined, `${length} game asks about ${repeat} twice`);
   }
   const { cats, r1, r2 } = expected[length];
   const pot = cats * (r1.reduce((a, b) => a + b) + r2.reduce((a, b) => a + b));
-  console.log(`ok   ${length.toLowerCase()} game: ${cats} categories x ${r1.length} clues, $${pot.toLocaleString()} on the boards, current columns every time`);
+  console.log(`ok   ${length.toLowerCase()} game: ${cats} categories x ${r1.length} clues, $${pot.toLocaleString()} on the boards, current columns, varied boards, no repeat players`);
 }

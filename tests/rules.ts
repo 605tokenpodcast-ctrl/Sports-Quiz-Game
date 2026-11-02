@@ -19,6 +19,8 @@ import {
   startCountdown,
   TIMES,
   trackAnswer,
+  EARLY_BUZZ_LOCKOUT_MS,
+  inEarlyBuzzLockout,
 } from '../game/rules';
 import {recapAwards} from '../game/recap';
 import type {ActiveClueState, Contestant, ContestantId} from '../game/types';
@@ -192,6 +194,13 @@ check('tied awards name everyone', () => {
   const a = person('player', 'Ann', {fastBuzzMs: 1000, fastBuzzes: 2});
   const b = person('player2', 'Bo', {fastBuzzMs: 1000, fastBuzzes: 2});
   assert.equal(recapAwards([a, b])[0].winner, 'Ann and Bo');
+});
+
+check('an early buzz locks that player out briefly, then the buzzer works again', () => {
+  const until = 1000 + EARLY_BUZZ_LOCKOUT_MS;
+  assert.equal(inEarlyBuzzLockout(1100, until), true);
+  assert.equal(inEarlyBuzzLockout(until + 1, until), false);
+  assert.equal(inEarlyBuzzLockout(1100, undefined), false);
 });
 
 if (failed) process.exit(1);

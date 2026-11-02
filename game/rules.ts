@@ -16,6 +16,15 @@ export const TIMES = {
   final: 30, // answering the Final Showdown
 };
 
+/**
+ * Buzzing while the clue is still being read locks that player out for this long, as on TV,
+ * so tapping over and over doesn't beat waiting for the light.
+ */
+export const EARLY_BUZZ_LOCKOUT_MS = 250;
+/** True when a buzz pressed at `pressedAt` falls inside an early-buzz lockout that ends at `lockedUntil`. */
+export const inEarlyBuzzLockout = (pressedAt: number, lockedUntil: number | undefined) =>
+  lockedUntil !== undefined && pressedAt < lockedUntil;
+
 // --- Countdowns -------------------------------------------------------------------------
 
 export const startCountdown = (seconds: number, now: number): Countdown => ({endsAt: now + seconds * 1000, leftMs: seconds * 1000});

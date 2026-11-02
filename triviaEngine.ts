@@ -21,6 +21,12 @@ export interface QuestionClue {
   sport: SportTag;
   difficulty: number; // 1 to 5
   isBonusWager?: boolean;
+  /**
+   * Everyone this clue is about, normalized: the answer when it's a person, plus any player
+   * named in the clue. A game never asks two clues about the same person, so one clue can't
+   * give away another's answer.
+   */
+  subjects?: string[];
 }
 
 export interface TriviaCategory {
@@ -351,7 +357,6 @@ export function getAllCompiledCategories(): TriviaCategory[] {
 
   for (const spec of [...BUILT_IN_NFL_SPECS, ...EXTERNAL_SPECS]) {
     const clues: QuestionClue[] = [];
-    const seenAnswersInCat = new Set<string>();
 
     spec.entries.forEach((raw, idx) => {
       const cleanAnswer = sanitizeAnswerChoice(raw.answer);
@@ -380,7 +385,6 @@ export function getAllCompiledCategories(): TriviaCategory[] {
         difficulty: raw.difficulty,
       });
 
-      seenAnswersInCat.add(ansNorm);
     });
 
     result.push({
@@ -391,9 +395,66 @@ export function getAllCompiledCategories(): TriviaCategory[] {
     });
   }
 
+  tagSubjects(result);
   COMPILED_CACHE = result;
   return result;
 }
+
+/** Fills in each clue's `subjects`: the people (from every person answer in the bank) it names. */
+function tagSubjects(categories: TriviaCategory[]): void {
+  const people = new Map<string, string>(); // "Willie Roaf" -> "willieroaf"
+  for (const cat of categories) {
+    for (const q of cat.clues) if (answerKind(q.correctAnswer) === 'person') people.set(q.correctAnswer, normalizeAnswer(q.correctAnswer));
+  }
+  // Runs of 2 to 4 capitalized words, the shape of a name ("Patrick Mahomes", "Kenneth Walker III").
+  const nameRun = /[A-Z][A-Za-z.'\-]+(?: [A-Z][A-Za-z.'\-]+){1,3}/g;
+  for (const cat of categories) {
+    for (const q of cat.clues) {
+      const found = new Set<string>();
+      if (people.has(q.correctAnswer)) found.add(people.get(q.correctAnswer)!);
+      for (const run of q.clue.match(nameRun) ?? []) {
+        const words = run.split(' ');
+        // Try every 2 to 4 word stretch, since a run can include words before the name ("Georgia quarterback Matthew Stafford" has none, "Kansas City Chiefs Patrick Mahomes" does).
+        for (let i = 0; i < words.length; i++) {
+          for (let j = i + 2; j <= Math.min(words.length, i + 4); j++) {
+            const norm = people.get(words.slice(i, j).join(' '));
+            if (norm) found.add(norm);
+          }
+        }
+      }
+      q.subjects = [...found];
+    }
+  }
+}
+
+/** True when this clue's answer or anyone it's about has already been used in this game. */
+export function clueOverlaps(q: QuestionClue, used: Set<string>): boolean {
+  return used.has(normalizeAnswer(q.correctAnswer)) || (q.subjects ?? []).some((s) => used.has(s));
+}
+
+/** Marks this clue's answer and the people it's about as used in this game. */
+export function markClueUsed(q: QuestionClue, used: Set<string>): void {
+  used.add(normalizeAnswer(q.correctAnswer));
+  for (const s of q.subjects ?? []) used.add(s);
+}
+
+// Board columns that are too alike to share a board: at most one of each family per round.
+const CATEGORY_FAMILIES: [RegExp, string][] = [
+  [/^nfl_(drafted_by_|draft_steals$|mr_irrelevant$|number_one_picks$)/, 'draft'],
+  [/^nfl_colleges_/, 'college'],
+  [/^nfl_(passing|rushing|receiving)_leaders$/, 'leaders'],
+  [/^nfl_super_bowl/, 'super_bowl'],
+];
+export const categoryFamily = (id: string) => CATEGORY_FAMILIES.find(([re]) => re.test(id))?.[1] ?? id;
+
+/** Big-game and famous-season columns. Every board gets at least one, besides the current column. */
+export const STORY_CATEGORY_IDS = new Set([
+  'nfl_super_bowl',
+  'nfl_super_bowl_details',
+  'nfl_conference_title',
+  'nfl_records',
+  'nfl_records_legends',
+]);
 
 export function getTotalCategoryCount(): number {
   return getActiveCategories().length;
@@ -439,10 +500,16 @@ export function getSeenQuestionIds(): Set<string> {
 }
 
 export function markQuestionSeen(id: string): void {
+  markQuestionsSeen([id]);
+}
+
+/** Marks questions as seen on this device, saving the list once for the whole batch. */
+export function markQuestionsSeen(ids: string[]): void {
   hydrateSeenStore();
-  if (SEEN_HASH_SET.has(id)) return;
-  SEEN_HASH_SET.add(id);
-  SEEN_TOTAL_COUNT++;
+  const fresh = ids.filter((id) => !SEEN_HASH_SET.has(id));
+  if (!fresh.length) return;
+  for (const id of fresh) SEEN_HASH_SET.add(id);
+  SEEN_TOTAL_COUNT += fresh.length;
 
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
@@ -517,16 +584,16 @@ export const BOARD_LAYOUTS: Record<
 };
 
 // ===========================================================================
-// STRICT DEDUPLICATION BOARD GENERATOR
-// Ensures:
-// 1. usedCategoryIds: No category repeats in the same game session.
-// 2. usedQuestionIds: No question ID repeats in the same game session.
-// 3. usedAnswers: No two questions played have the same normalized correct answer.
+// BOARD GENERATOR
+// Within one game:
+// 1. No category repeats, and a board has at most one column of each family (one draft
+//    column, one college column ...), plus at least one big-game or famous-season column.
+// 2. No question repeats.
+// 3. No answer repeats, and no person is the subject of two clues.
 // ===========================================================================
 
 export function generateBoardForRound(
   round: 'ROUND_1' | 'ROUND_2',
-  difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT',
   categoryCount = 6,
   usedCategoryIds: Set<string>,
   usedQuestionIds: Set<string>,
@@ -544,105 +611,63 @@ export function generateBoardForRound(
   // favouring ones that still have plenty of questions this device hasn't seen.
   const availableCats = allCategories.filter((c) => !usedCategoryIds.has(c.id));
   const unseenCount = (c: TriviaCategory) => c.clues.filter((q) => !seen.has(q.id)).length;
-  const shuffledAvailable = [
+  const order = [
     ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) >= ladderSize)),
     ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) < ladderSize)),
   ];
   // The featured category (this week's games) is tried first so it makes the board even
-  // when this device has seen it all, then dropped into a random column below.
-  const featuredIdx = shuffledAvailable.findIndex((c) => c.id === featuredCategoryId);
-  if (featuredIdx > 0) shuffledAvailable.unshift(...shuffledAvailable.splice(featuredIdx, 1));
+  // when this device has seen it all, then a story column, then the rest.
+  const story = order.find((c) => STORY_CATEGORY_IDS.has(c.id) && c.id !== featuredCategoryId);
+  if (story) order.unshift(...order.splice(order.indexOf(story), 1));
+  const featuredIdx = order.findIndex((c) => c.id === featuredCategoryId);
+  if (featuredIdx > 0) order.unshift(...order.splice(featuredIdx, 1));
 
   const selectedBoard: TriviaCategory[] = [];
+  const familiesOnBoard = new Set<string>();
 
-  for (const cat of shuffledAvailable) {
+  for (const cat of order) {
     if (selectedBoard.length >= categoryCount) break;
+    const family = categoryFamily(cat.id);
+    if (familiesOnBoard.has(family)) continue;
 
-    // Filter clues that have not been served and whose answer has not been used in this session.
-    // Shuffled, then questions this device has never seen go first.
-    const eligibleShuffled = fisherYatesShuffle(
-      cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !usedAnswers.has(normalizeAnswer(q.correctAnswer)))
-    );
-    const eligibleClues = [
-      ...eligibleShuffled.filter((q) => !seen.has(q.id)),
-      ...eligibleShuffled.filter((q) => seen.has(q.id)),
-    ];
+    // Clues not served yet whose answer and people are new this game, shuffled,
+    // with questions this device has never seen first.
+    const eligibleShuffled = fisherYatesShuffle(cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers)));
+    const eligibleClues = [...eligibleShuffled.filter((q) => !seen.has(q.id)), ...eligibleShuffled.filter((q) => seen.has(q.id))];
 
-    // Ensure we can construct a full ladder (difficulty 1 to 5, or 1/3/5 for a short game)
+    // Build the ladder (difficulty 1 to 5, or 1/3/5 for a short game).
     const ladderClues: QuestionClue[] = [];
-    const localUsedClueIds = new Set<string>();
-    const localUsedAnswers = new Set<string>();
-
+    const localUsed = new Set<string>();
     for (let ladderIdx = 0; ladderIdx < ladderSize; ladderIdx++) {
       const targetDiff = layout.difficulties[ladderIdx];
-      const val = targetValues[ladderIdx];
-
+      const isFree = (q: QuestionClue) => !ladderClues.some((c) => c.id === q.id) && !clueOverlaps(q, localUsed);
       // Prefer an unseen exact difficulty match, then an unseen clue one level off,
-      // then any unseen clue, and only then something seen before.
-      const isFree = (q: QuestionClue) =>
-        !localUsedClueIds.has(q.id) &&
-        !localUsedAnswers.has(normalizeAnswer(q.correctAnswer)) &&
-        !usedAnswers.has(normalizeAnswer(q.correctAnswer)) &&
-        !usedQuestionIds.has(q.id);
-      let candidate =
+      // then any unseen clue, then a seen one at the right level, then anything left.
+      const candidate =
         eligibleClues.find((q) => !seen.has(q.id) && q.difficulty === targetDiff && isFree(q)) ||
         eligibleClues.find((q) => !seen.has(q.id) && Math.abs(q.difficulty - targetDiff) === 1 && isFree(q)) ||
         eligibleClues.find((q) => !seen.has(q.id) && isFree(q)) ||
-        eligibleClues.find(
-        (q) =>
-          q.difficulty === targetDiff &&
-          !localUsedClueIds.has(q.id) &&
-          !localUsedAnswers.has(normalizeAnswer(q.correctAnswer)) &&
-          !usedAnswers.has(normalizeAnswer(q.correctAnswer)) &&
-          !usedQuestionIds.has(q.id)
-      );
-
-      // If no exact difficulty match, pick any unused eligible clue in this category
-      if (!candidate) {
-        candidate = eligibleClues.find(
-          (q) =>
-            !localUsedClueIds.has(q.id) &&
-            !localUsedAnswers.has(normalizeAnswer(q.correctAnswer)) &&
-            !usedAnswers.has(normalizeAnswer(q.correctAnswer)) &&
-            !usedQuestionIds.has(q.id)
-        );
-      }
-
-      if (candidate) {
-        const assigned: QuestionClue = {
-          ...candidate,
-          value: val,
-        };
-        ladderClues.push(assigned);
-        localUsedClueIds.add(candidate.id);
-        localUsedAnswers.add(normalizeAnswer(candidate.correctAnswer));
-      }
+        eligibleClues.find((q) => q.difficulty === targetDiff && isFree(q)) ||
+        eligibleClues.find(isFree);
+      if (!candidate) break;
+      ladderClues.push({...candidate, value: targetValues[ladderIdx]});
+      markClueUsed(candidate, localUsed);
     }
 
     if (ladderClues.length === ladderSize) {
-      // Commit all clues and the category to session tracking
       ladderClues.forEach((c) => {
         usedQuestionIds.add(c.id);
-        usedAnswers.add(normalizeAnswer(c.correctAnswer));
-        markQuestionSeen(c.id);
+        markClueUsed(c, usedAnswers);
       });
-
+      markQuestionsSeen(ladderClues.map((c) => c.id));
       usedCategoryIds.add(cat.id);
-
-      selectedBoard.push({
-        id: cat.id,
-        title: cat.title,
-        sport: cat.sport,
-        clues: ladderClues,
-      });
+      familiesOnBoard.add(family);
+      selectedBoard.push({id: cat.id, title: cat.title, sport: cat.sport, clues: ladderClues});
     }
   }
 
-  if (selectedBoard[0]?.id === featuredCategoryId) {
-    const column = Math.floor(Math.random() * selectedBoard.length);
-    [selectedBoard[0], selectedBoard[column]] = [selectedBoard[column], selectedBoard[0]];
-  }
-  return selectedBoard;
+  // Shuffle the columns so the current and story columns land anywhere on the board.
+  return fisherYatesShuffle(selectedBoard);
 }
 
 /**
