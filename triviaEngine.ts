@@ -325,23 +325,27 @@ export interface ExternalBankInfo {
 }
 
 /**
- * Loads a question bank JSON file and adds its categories to the pool.
- * Fails quietly so the game still works with the built-in questions offline.
+ * Loads a question bank JSON file and adds its categories to the pool, trying a few times
+ * on a flaky connection. Resolves null if it never loads (the game can't deal a full board
+ * from the built-in questions alone, so the start menu waits for this).
  */
-export async function loadExternalQuestionBank(url = 'questions/nfl.json'): Promise<ExternalBankInfo | null> {
-  try {
-    const res = await fetch(url, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    const bank = await res.json();
-    const known = new Set(EXTERNAL_SPECS.map((c) => c.id));
-    for (const c of bank.categories as CategorySpec[]) {
-      if (!known.has(c.id)) EXTERNAL_SPECS.push(c);
-    }
-    COMPILED_CACHE = null;
-    return { questionCount: bank.questionCount, dataThrough: bank.dataThrough };
-  } catch (e) {
-    return null;
+export async function loadExternalQuestionBank(url = 'questions/nfl.json', attempts = 3): Promise<ExternalBankInfo | null> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(url, { cache: 'no-cache' });
+      if (res.ok) {
+        const bank = await res.json();
+        const known = new Set(EXTERNAL_SPECS.map((c) => c.id));
+        for (const c of bank.categories as CategorySpec[]) {
+          if (!known.has(c.id)) EXTERNAL_SPECS.push(c);
+        }
+        COMPILED_CACHE = null;
+        return { questionCount: bank.questionCount, dataThrough: bank.dataThrough };
+      }
+    } catch (e) {}
+    if (attempt < attempts) await new Promise((r) => setTimeout(r, 1000 * attempt));
   }
+  return null;
 }
 
 /** Categories in play. The game is NFL only, so other sports in the old bank are skipped. */

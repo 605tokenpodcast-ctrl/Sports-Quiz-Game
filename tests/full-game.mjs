@@ -18,9 +18,20 @@ try {
   const page = await browser.newPage({viewport: {width: 1000, height: 800}});
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('dialog', (d) => d.accept());
+  // A slow question bank: the game must not start until it's in, or Round 2 has no board.
+  await page.route('**/questions/nfl.json', async (route) => {
+    await new Promise((r) => setTimeout(r, 2500));
+    await route.continue();
+  });
   await page.goto('http://127.0.0.1:5199/?board=2x2');
   await page.click('text=4-Choice');
-  await page.click('text=ENTER THE ARENA');
+  const startButton = page.locator('button:has-text("LOADING QUESTIONS")');
+  await startButton.waitFor({timeout: 5000});
+  if (!(await startButton.isDisabled())) {
+    failed = true;
+    console.log('FAIL start button works before the question bank loads');
+  } else console.log('ok   start waits for the question bank');
+  await page.click('text=ENTER THE ARENA', {timeout: 15000});
 
   const visible = async (selector) => {
     const el = page.locator(selector).first();

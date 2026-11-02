@@ -24,6 +24,8 @@ export default function StartMenu() {
     setIsTwoPlayerMode,
     gameState,
     bankInfo,
+    bankStatus,
+    loadBank,
     seenQuestionsCount,
     totalQuestionCount,
     totalCategoryCount,
@@ -59,8 +61,14 @@ export default function StartMenu() {
               SPORTS ARENA SHOWDOWN
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mb-3">
-              Face off in NFL trivia with {totalQuestionCount.toLocaleString()} questions in {totalCategoryCount} categories
-              {bankInfo ? `, updated through the ${bankInfo.dataThrough}` : ''}.
+              {bankInfo ? (
+                <>
+                  Face off in NFL trivia with {totalQuestionCount.toLocaleString()} questions in {totalCategoryCount} categories, updated
+                  through the {bankInfo.dataThrough}.
+                </>
+              ) : (
+                'Loading the NFL question bank...'
+              )}
             </p>
 
             {/* Contestant Name Bar with fully interactive Edit Tag Modal */}
@@ -285,11 +293,22 @@ export default function StartMenu() {
               ref={startButtonRef}
               autoFocus
               onClick={startMatch}
-              disabled={needsPhones}
+              disabled={needsPhones || bankStatus !== 'ready'}
               className="min-w-[48px] min-h-[48px] w-full py-3 rounded-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 text-slate-950 font-black text-base shadow-xl transition-transform active:scale-95 flex items-center justify-center gap-2 mb-3 disabled:opacity-50 disabled:cursor-wait">
               <Play className="w-5 h-5 fill-slate-950" />
-              {needsPhones ? `WAITING FOR PHONES (${seatedPhones}/2+)` : 'ENTER THE ARENA'}
+              {bankStatus === 'loading'
+                ? 'LOADING QUESTIONS...'
+                : bankStatus === 'failed'
+                ? "QUESTIONS DIDN'T LOAD"
+                : needsPhones
+                ? `WAITING FOR PHONES (${seatedPhones}/2+)`
+                : 'ENTER THE ARENA'}
             </button>
+            {bankStatus === 'failed' && (
+              <button onClick={loadBank} className="-mt-1 mb-3 text-sm font-black text-amber-300 underline underline-offset-2">
+                Check your connection, then tap to try again
+              </button>
+            )}
 
             {/* Secondary Buttons: Leaderboards, Phone Duel, Rules */}
             <div className="flex flex-wrap items-center justify-center gap-3">
