@@ -1,5 +1,6 @@
 // All the game's state and flow: the host runs the game here, and a phone keeps its copy in step.
 // The screens read it through GameContext.
+import {getSeason, recordSeasonGame, resetSeason, seasonStandings, type SeasonRow} from '../utils/season';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {SETTINGS} from '../constants';
 import {gameAudio, GameState, useAutoFocus} from '../utils/helper';
@@ -21,6 +22,7 @@ import {
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
 import {
   answerLine,
+  streakLine,
   getVoiceSpeed,
   isSpeechSupported,
   setVoiceSpeed as setSpeechSpeed,
@@ -78,8 +80,12 @@ import {
   trackAnswer,
   startCountdown,
   TIMES,
+  remoteBuzzTime,
   EARLY_BUZZ_LOCKOUT_MS,
   inEarlyBuzzLockout,
+  aiCorrectChance,
+  aiBuzzChance,
+  updateStreaks,
 } from './rules';
 import {
   AnswerFormat,
@@ -95,6 +101,21 @@ import {BGM_TRIVIA, BGM_FINAL} from '../ui/shared';
 
 // What is read aloud when a clue opens.
 // The intro is read with a little more energy than the clue itself.
+/** What the host voice says as a player's Final Showdown result is revealed. */
+export const finalRevealLine = (c: Contestant) =>
+  `${c.name} wrote ${c.finalAnswer && c.finalAnswer !== '(No Answer)' ? c.finalAnswer : 'nothing'}. ${
+    c.finalCorrect ? "That's right!" : 'Sorry, no.'
+  } The wager: ${c.wager.toLocaleString('en-US')} dollars, for a total of ${c.score.toLocaleString('en-US')}.`;
+
+/** What the host voice says for each column in a round's category reveal (the first line opens the round). */
+export const categoryIntroLines = (round: RoundType, board: {title: string; description?: string}[]): string[] =>
+  board.map((cat, i) => {
+    const opener =
+      i > 0 ? '' : round === 'ROUND_1' ? "Here are today's categories. " : 'Round 2, where the values double! Your categories. ';
+    const about = cat.description ? ` ${cat.description}` : '';
+    return `${opener}${cat.title}.${about}`;
+  });
+
 const spokenClue = (clue: QuestionClue): SpeechPart[] => [
   {text: `${clue.category}, for ${spokenMoney(clue.value)}!`, hype: true},
   clue.clue,
@@ -159,6 +180,12 @@ export function useGameController() {
   const [leaderboardFilterFormat, setLeaderboardFilterFormat] = useState<AnswerFormat>('STANDARD');
   const [leaderboardFilterLength, setLeaderboardFilterLength] = useState<GameLength>('FULL');
   const [leaderboardRefreshCounter, setLeaderboardRefreshCounter] = useState(0);
+  // Podcast season standings (host device), shown on the leaderboard and the stream screen's results.
+  const [seasonRows, setSeasonRows] = useState<SeasonRow[]>(() => seasonStandings(getSeason()));
+  const startNewSeason = () => {
+    resetSeason();
+    setSeasonRows([]);
+  };
   const [highScoreCelebration, setHighScoreCelebration] = useState<{
     rank: number;
     isHighScore: boolean;
@@ -243,11 +270,15 @@ export function useGameController() {
   // NFL question bank, built weekly from nflverse data
   const [bankInfo, setBankInfo] = useState<ExternalBankInfo | null>(null);
 
+  // Only the host deals questions. Phones and the stream screen never load the bank, which
+  // saves them a 1.4 MB download and the work of preparing 4,000 questions as they join.
   useEffect(() => {
+    if (deviceRole !== 'HOST' || bankInfo) return;
     loadExternalQuestionBank().then((info) => {
       if (info) setBankInfo(info);
     });
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole]);
 
   // Anti-repeat question statistics
   const seenQuestionsCount = useMemo(() => {
@@ -333,6 +364,18 @@ export function useGameController() {
 
   // The biggest single win of the match, for the recap.
   const [bigPlay, setBigPlay] = useState<BigPlay | null>(null);
+  // The category reveal at the start of a round (when clues are read aloud): `shown` columns
+  // are revealed so far. Nobody can pick a tile until it's done or skipped.
+  const [categoryIntro, setCategoryIntro] = useState<{round: RoundType; shown: number} | null>(null);
+  const categoryIntroRef = useRef(categoryIntro);
+  categoryIntroRef.current = categoryIntro;
+  const introducedRoundsRef = useRef(new Set<RoundType>());
+  // The Final Showdown reveal: players' results in `order`, `shown` of them revealed so far.
+  // The Final's results wait in the ref until the reveal ends.
+  const [finalReveal, setFinalReveal] = useState<{order: ContestantId[]; shown: number} | null>(null);
+  const pendingFinalRef = useRef<{after: Record<ContestantId, Contestant>; finalScores: Record<ContestantId, number>} | null>(null);
+  /** False while this player's Final result is still waiting to be revealed. */
+  const finalShownFor = (id: ContestantId) => !finalReveal || !finalReveal.order.includes(id) || finalReveal.order.indexOf(id) < finalReveal.shown;
 
   // Match statistics for post-game
   const [matchStats, setMatchStats] = useState<MatchStats>({
@@ -633,7 +676,7 @@ export function useGameController() {
   // Open a clue card (authoritative selection on host)
   const selectClue = useCallback(
     (categoryIndex: number, clueIndex: number, pickerId: ContestantId = activeSelector) => {
-      if (activeClue) return;
+      if (activeClue || categoryIntroRef.current) return;
       const board = currentRound === 'ROUND_1' ? round1Board : round2Board;
       const clue = board[categoryIndex]?.clues[clueIndex];
       if (!clue || answeredClueIds.has(clue.id)) return;
@@ -807,6 +850,10 @@ export function useGameController() {
     setFinalLocks(NO_FINAL_LOCKS);
     awaySeatsRef.current = {};
     setAwaySeats({});
+    introducedRoundsRef.current = new Set();
+    setCategoryIntro(null);
+    pendingFinalRef.current = null;
+    setFinalReveal(null);
     setGameState((prev) => ({...prev, status: 'PLAYING', score: 0, level: 1}));
     setIsGameMenuOpen(false);
     setIsHowToPlayOpen(false);
@@ -859,6 +906,21 @@ export function useGameController() {
   };
   const awardBuzzRef = useRef(awardBuzz);
   awardBuzzRef.current = awardBuzz;
+
+  // Phone: when this phone first showed the buzzer open for the current clue.
+  const buzzerSeenRef = useRef<{clueId: string; at: number}>({clueId: '', at: 0});
+  /** Phone: buzz in, with the reaction time since this phone showed the light (none if it hasn't yet). */
+  const sendClientBuzz = () => {
+    const seen = buzzerSeenRef.current;
+    const clueId = activeClueRef.current?.clue.id;
+    p2pRef.current?.send({
+      type: 'CLIENT_BUZZ',
+      contestantId: mySeat,
+      timestamp: Date.now(),
+      clueId,
+      reactionMs: seen.clueId && seen.clueId === clueId ? Date.now() - seen.at : undefined,
+    });
+  };
 
   // Early buzzes on the open clue: when each player's short lockout ends.
   const earlyBuzzRef = useRef<{clueId: string; until: Partial<Record<ContestantId, number>>}>({clueId: '', until: {}});
@@ -939,10 +1001,9 @@ export function useGameController() {
     }
     // Daily Doubles have no buzz race, so they don't count toward Quick Draw.
     const awardHow = {buzzMs: prev.isBonusWager ? undefined : prev.buzzMs, byVoice: how.kind === 'player' && how.byVoice};
-    setContestants((c) => ({
-      ...c,
-      [who]: trackAnswer(scoreAnswer(c[who], stake, correct, prev.isBonusWager), correct, prev.clue, awardHow),
-    }));
+    setContestants((c) =>
+      updateStreaks({...c, [who]: trackAnswer(scoreAnswer(c[who], stake, correct, prev.isBonusWager), correct, prev.clue, awardHow)}, who, correct)
+    );
 
     const name = contestantsRef.current[who]?.name || (how.kind === 'ai' ? 'Opponent' : 'Player');
     commitClue(resolveAnswer(prev, who, correct, how, {name, buzzerSeats, now: Date.now()}));
@@ -1046,9 +1107,16 @@ export function useGameController() {
         if (!seat) return;
 
         switch (msg.type) {
-          case 'CLIENT_BUZZ':
-            handleContestantBuzz(seat, Date.now() - (p2pRef.current?.oneWayDelayMs(fromPeerId) ?? 0));
+          case 'CLIENT_BUZZ': {
+            // Timed from when that phone showed the light, so the host's own player has no head start.
+            const current = activeClueRef.current;
+            const sameOpening = current?.phase === 'BUZZER_OPEN' && msg.clueId === current.clue.id;
+            handleContestantBuzz(
+              seat,
+              remoteBuzzTime(buzzersOpenedAtRef.current, Date.now(), p2pRef.current?.oneWayDelayMs(fromPeerId) ?? 0, sameOpening ? msg.reactionMs : undefined)
+            );
             break;
+          }
 
           case 'CLIENT_ANSWER':
             handleContestantSubmitAnswer(msg.answer, seat, msg.alternatives);
@@ -1128,7 +1196,14 @@ export function useGameController() {
           if (s.answeredClueIds) setAnsweredClueIds(new Set(s.answeredClueIds));
           if (s.activeSelector) setActiveSelector(s.activeSelector);
           if (s.contestants) setContestants(s.contestants);
-          if (s.activeClue !== undefined) setActiveClue(s.activeClue && countdownFromSync(s.activeClue, Date.now()));
+          if (s.activeClue !== undefined) {
+            setActiveClue(s.activeClue && countdownFromSync(s.activeClue, Date.now()));
+            // Note when this phone first shows the buzzer open, to time the player's reaction from then.
+            const open = s.activeClue?.phase === 'BUZZER_OPEN';
+            const seen = buzzerSeenRef.current;
+            if (!open) buzzerSeenRef.current = {clueId: '', at: 0};
+            else if (seen.clueId !== s.activeClue.clue.id) buzzerSeenRef.current = {clueId: s.activeClue.clue.id, at: Date.now()};
+          }
           if (s.difficulty) setDifficulty(s.difficulty);
           if (s.answerMode) setAnswerMode(s.answerMode);
           if (s.finalClue) setFinalClue(s.finalClue);
@@ -1142,8 +1217,11 @@ export function useGameController() {
             setVoiceSpeedState(s.voiceSpeed);
           }
           if (s.gameLength) setGameLength(s.gameLength);
+          if (s.season) setSeasonRows(s.season);
           if (s.lineup) setSyncedLineup(s.lineup);
           if (s.bigPlay !== undefined) setBigPlay(s.bigPlay);
+          if (s.categoryIntro !== undefined) setCategoryIntro(s.categoryIntro);
+          if (s.finalReveal !== undefined) setFinalReveal(s.finalReveal);
           if (s.aiPickingTile !== undefined) setAiPickingTile(s.aiPickingTile);
           if (s.aiThinkingStatus !== undefined) setAiThinkingStatus(s.aiThinkingStatus);
         }
@@ -1240,15 +1318,17 @@ export function useGameController() {
         round2Board: tilesOnly(round2Board),
         difficulty,
         answerMode,
-        finalClue: finalClue && (finalShowdownPhase === 'RESULTS' ? finalClue : hideAnswer(finalClue)),
+        // The Final's answer goes out once every player's result has been revealed.
+        finalClue: finalClue && (finalShowdownPhase === 'RESULTS' && !finalReveal ? finalClue : hideAnswer(finalClue)),
         finalOptions,
         seats: remoteSeats,
         readAloud,
         voiceSpeed,
         gameLength,
+        season: seasonRows.slice(0, 8),
       },
     });
-  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS', remoteSeats, readAloud, voiceSpeed, gameLength, screenCount]);
+  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS' && !finalReveal, remoteSeats, readAloud, voiceSpeed, gameLength, screenCount, seasonRows]);
 
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
@@ -1270,6 +1350,8 @@ export function useGameController() {
         bigPlay,
         aiPickingTile,
         aiThinkingStatus,
+        categoryIntro,
+        finalReveal,
       },
     });
   }, [
@@ -1289,6 +1371,8 @@ export function useGameController() {
     bigPlay,
     aiPickingTile,
     aiThinkingStatus,
+    categoryIntro,
+    finalReveal,
   ]);
 
   // AI Board Selection turn logic when it's Coach or Analyst's turn to pick
@@ -1297,6 +1381,7 @@ export function useGameController() {
       deviceRole !== 'HOST' ||
       gameState.status !== 'PLAYING' ||
       activeClue ||
+      categoryIntro ||
       currentRound === 'FINAL_SHOWDOWN' ||
       isGameMenuOpen ||
       isHowToPlayOpen ||
@@ -1382,7 +1467,44 @@ export function useGameController() {
     contestants,
     selectClue,
     player3Human,
+    categoryIntro,
   ]);
+
+  // Clocks stop while a menu is open on the host.
+  const clocksPaused =
+    gameState.status !== 'PLAYING' || isGameMenuOpen || isHowToPlayOpen || isInviteModalOpen || isLeaderboardOpen || isTagEditorOpen;
+
+  // Category reveal: when clues are read aloud, each round opens with its columns revealed one
+  // at a time and read out, so listeners know the board before play starts. The host paces it
+  // by how long each line takes to say.
+  const currentBoard = currentRound === 'ROUND_1' ? round1Board : currentRound === 'CHAMPIONSHIP' ? round2Board : [];
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || gameState.status !== 'PLAYING' || !readAloud || !currentBoard.length) return;
+    if (currentRound !== 'ROUND_1' && currentRound !== 'CHAMPIONSHIP') return;
+    if (introducedRoundsRef.current.has(currentRound) || activeClue) return;
+    introducedRoundsRef.current.add(currentRound);
+    setCategoryIntro({round: currentRound, shown: 0});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, gameState.status, readAloud, currentRound, currentBoard.length]);
+
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || !categoryIntro || clocksPaused) return;
+    const {shown} = categoryIntro;
+    // The opening line plays before the first column; each column then stays up while it's read.
+    const lines = categoryIntroLines(categoryIntro.round, currentBoard);
+    const wait = shown === 0 ? 0.6 : readingSeconds(lines[shown - 1] ?? '', 1.8, speechRate());
+    const timer = setTimeout(() => {
+      setCategoryIntro((ci) => (!ci ? ci : ci.shown >= currentBoard.length ? null : {...ci, shown: ci.shown + 1}));
+    }, wait * 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, categoryIntro, clocksPaused]);
+
+  const skipCategoryIntro = () => {
+    if (deviceRole !== 'HOST') return;
+    stopSpeaking();
+    setCategoryIntro(null);
+  };
 
   // Host: when the open clue's clock runs out, move it to the next phase.
   const onClueTimeUp = () => {
@@ -1412,10 +1534,6 @@ export function useGameController() {
   };
   const onClueTimeUpRef = useRef(onClueTimeUp);
   onClueTimeUpRef.current = onClueTimeUp;
-
-  // Clocks stop while a menu is open on the host.
-  const clocksPaused =
-    gameState.status !== 'PLAYING' || isGameMenuOpen || isHowToPlayOpen || isInviteModalOpen || isLeaderboardOpen || isTagEditorOpen;
 
   // Host: one timeout for the end of the clue's current clock, instead of ticking ten times a second.
   useEffect(() => {
@@ -1460,8 +1578,13 @@ export function useGameController() {
   useEffect(() => {
     if (deviceRole !== 'HOST' || !activeClue || activeClue.phase !== 'BUZZER_OPEN' || activeClue.isBonusWager) return;
 
-    const coachCanBuzz = !isTwoPlayerMode && !isClientConnected && !activeClue.buzzerLockout.coach;
-    const analystCanBuzz = !player3Human && !activeClue.buzzerLockout.analyst;
+    // Each AI decides once per clue whether it knows this one: it only buzzes when it thinks so,
+    // and harder clues outside its specialty make that less likely.
+    const {clue} = activeClue;
+    const knows = (who: 'coach' | 'analyst') =>
+      Math.random() < aiBuzzChance(aiCorrectChance(who === 'coach' ? aiConfig.coachAcc : aiConfig.analystAcc, who, clue.difficulty, clue.categoryId));
+    const coachCanBuzz = !isTwoPlayerMode && !isClientConnected && !activeClue.buzzerLockout.coach && knows('coach');
+    const analystCanBuzz = !player3Human && !activeClue.buzzerLockout.analyst && knows('analyst');
 
     const reflexMult = SETTINGS.aiReflexSpeedMultiplier;
     const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult;
@@ -1497,7 +1620,8 @@ export function useGameController() {
     if (buzzedId === 'analyst' && player3Human) return;
 
     const isCoach = buzzedId === 'coach';
-    const accuracy = isCoach ? aiConfig.coachAcc : aiConfig.analystAcc;
+    const clueNow = activeClue.clue;
+    const accuracy = aiCorrectChance(isCoach ? aiConfig.coachAcc : aiConfig.analystAcc, buzzedId, clueNow.difficulty, clueNow.categoryId);
     const isCorrect = Math.random() < accuracy;
     const thinkTime = 1400 + Math.random() * 1200;
 
@@ -1551,19 +1675,38 @@ export function useGameController() {
     } else if (phase === 'ANSWERING') {
       stopSpeaking();
     } else if (phase === 'REVEALED' && clue.correctAnswer) {
-      speak({text: answerLine(clue.correctAnswer), hype: true});
+      // A player on a hot streak gets a shout-out after the answer.
+      const who = activeClue.buzzedContestantId;
+      const hot = who && streakLine(contestants[who].name, contestants[who].streak || 0);
+      speak(hot ? [{text: answerLine(clue.correctAnswer), hype: true}, {text: hot, hype: true}] : {text: answerLine(clue.correctAnswer), hype: true});
     }
     // Only when the clue moves to a new phase.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speaksHere, activeClue?.clue.id, activeClue?.phase, activeClue?.bonusWagerLocked]);
 
+  // Read each column out as the category reveal shows it.
+  useEffect(() => {
+    if (!speaksHere || !categoryIntro || categoryIntro.shown === 0) return;
+    const line = categoryIntroLines(categoryIntro.round, currentBoard)[categoryIntro.shown - 1];
+    if (line) speak({text: line, hype: categoryIntro.shown === 1});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speaksHere, categoryIntro?.round, categoryIntro?.shown]);
+
   // The Final Showdown clue is read when it is revealed, and its answer at the results.
   useEffect(() => {
     if (!speaksHere || currentRound !== 'FINAL_SHOWDOWN' || !finalClue) return;
     if (finalShowdownPhase === 'CLUE') speak(spokenFinal(finalClue));
-    else if (finalShowdownPhase === 'RESULTS' && finalClue.correctAnswer) speak({text: answerLine(finalClue.correctAnswer), hype: true});
+    else if (finalShowdownPhase === 'RESULTS' && !finalReveal && finalClue.correctAnswer) speak({text: answerLine(finalClue.correctAnswer), hype: true});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [speaksHere, currentRound, finalShowdownPhase, finalClue?.id, finalClue?.correctAnswer]);
+  }, [speaksHere, currentRound, finalShowdownPhase, finalClue?.id, finalClue?.correctAnswer, Boolean(finalReveal)]);
+
+  // Each player's Final answer and wager is read as it's revealed.
+  useEffect(() => {
+    if (!speaksHere || !finalReveal || finalReveal.shown === 0) return;
+    const id = finalReveal.order[finalReveal.shown - 1];
+    speak({text: finalRevealLine(contestants[id]), hype: true});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speaksHere, finalReveal?.shown]);
 
   // Spacebar, Enter, number (1-8), and letter (A-H) shortcuts for buzzing and answering
   useEffect(() => {
@@ -1614,11 +1757,7 @@ export function useGameController() {
       if (deviceRole === 'CLIENT') {
         if (e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
-          p2pRef.current?.send({
-            type: 'CLIENT_BUZZ',
-            contestantId: mySeat,
-            timestamp: Date.now(),
-          });
+          sendClientBuzz();
         }
         return;
       }
@@ -1815,10 +1954,53 @@ export function useGameController() {
       finalScores[id] = c.score + (correct ? c.wager : -c.wager);
       after[id] = {...c, score: finalScores[id], reaction: correct ? 'correct' : 'wrong', finalCorrect: correct, finalAnswer: answer};
     }
+    setFinalShowdownPhase('RESULTS');
+    // Reveal each player's answer and wager one at a time, lowest score first, as on TV. The
+    // game ends once everyone has been revealed.
+    const order = activeContestantsList
+      .filter((id) => !contestants[id].sitsOutFinal)
+      .sort((a, b) => contestants[a].score - contestants[b].score);
+    pendingFinalRef.current = {after, finalScores};
+    if (order.length) {
+      setFinalReveal({order, shown: 0});
+      return;
+    }
+    finishGameRef.current();
+  }, [finalClue, finalOptions, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, activeContestantsList]);
+
+  // Host: one player's Final result at a time, then the end of the game.
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || !finalReveal || clocksPaused) return;
+    const {order, shown} = finalReveal;
+    const pending = pendingFinalRef.current;
+    if (!pending) return;
+    const done = shown >= order.length;
+    const seconds = shown === 0 ? 1.5 : readAloud ? Math.max(4, readingSeconds(finalRevealLine(pending.after[order[shown - 1]]), 0, speechRate())) : 3.5;
+    const timer = setTimeout(() => {
+      if (done) {
+        finishGameRef.current();
+        return;
+      }
+      const id = order[shown];
+      const c = pending.after[id];
+      if (c.finalCorrect) gameAudio.playCoinPickup();
+      else gameAudio.playErrorBuzz();
+      setContestants((all) => ({...all, [id]: c}));
+      setFinalReveal({order, shown: shown + 1});
+    }, (done ? 2.5 : seconds) * 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, finalReveal, clocksPaused]);
+
+  // Host: the Final is over. Apply every score, save the leaderboard and show the results.
+  const finishGame = () => {
+    const pending = pendingFinalRef.current;
+    if (!pending) return;
+    pendingFinalRef.current = null;
+    setFinalReveal(null);
+    const {after, finalScores} = pending;
     setContestants(after);
     const {coach: finalCoachScore, analyst: finalAnalystScore, player: finalPlayerScore, player2: finalPlayer2Score} = finalScores;
-
-    setFinalShowdownPhase('RESULTS');
 
     const highestScore = Math.max(
       finalPlayerScore,
@@ -1835,6 +2017,20 @@ export function useGameController() {
     // Save final match score to persistent Leaderboard
     saveMatchToLeaderboard(finalScores);
 
+    // Add the game to the podcast season: every person who played, with the top score as the win.
+    const topScore = Math.max(...activeContestantsList.map((id) => finalScores[id]));
+    const people = activeContestantsList.filter((id) => id === 'player' || id === 'player2' || (id === 'analyst' && player3Human));
+    setSeasonRows(
+      recordSeasonGame(
+        people.map((id) => ({
+          name: id === 'player' && hostPlays ? playerName || 'Champion' : after[id].name,
+          score: finalScores[id],
+          won: finalScores[id] === topScore,
+          finalCorrect: after[id].sitsOutFinal ? undefined : after[id].finalCorrect,
+        }))
+      )
+    );
+
     if (humanWon) {
       gameAudio.playVictoryFanfare();
       setGameState((prev) => ({...prev, status: 'VICTORY', score: Math.max(finalPlayerScore, finalPlayer2Score)}));
@@ -1842,7 +2038,9 @@ export function useGameController() {
       gameAudio.playDefeatMotif();
       setGameState((prev) => ({...prev, status: 'GAME_OVER', score: finalPlayerScore}));
     }
-  }, [finalClue, finalOptions, finalShowdownPhase, finalPlayerInput, finalPlayer2Input, finalPlayer3Input, player3Human, isTwoPlayerMode, isClientConnected, aiConfig, contestants, saveMatchToLeaderboard, activeContestantsList]);
+  };
+  const finishGameRef = useRef(finishGame);
+  finishGameRef.current = finishGame;
 
   // With friends on phones, the Final waits until each player has locked in (or the clock runs out).
   const allRemoteWagersLocked = onlineRemoteSeats.every((seat) => finalLocks.wager[seat]);
@@ -2073,6 +2271,13 @@ export function useGameController() {
     streamScreenUrl,
     greenScreenUrl,
     bigPlay,
+    categoryIntro,
+    skipCategoryIntro,
+    finalReveal,
+    finalShownFor,
+    seasonRows,
+    startNewSeason,
+    sendClientBuzz,
     recapMomentsList,
     recapAwardsList,
     shareRecap,

@@ -278,6 +278,14 @@ export const sampleLine = (): SpeechPart[] => [
 export const spokenMoney = (amount: number) => amount.toLocaleString();
 
 /** A short, varied host line for the answer reveal. */
+/** What the host voice says when a player's run of right answers reaches 3, 5, 7 ... (empty otherwise). */
+export function streakLine(name: string, streak: number): string {
+  if (streak < 3 || streak % 2 === 0) return '';
+  if (streak === 3) return `${name} is heating up!`;
+  if (streak === 5) return `${name} is on fire!`;
+  return `${name} can't miss! That's ${streak} in a row!`;
+}
+
 export function answerLine(answer: string, pick = Math.random()): string {
   const lines = [`It's ${answer}!`, `The answer: ${answer}!`, `That's ${answer}!`];
   return lines[Math.floor(pick * lines.length) % lines.length];

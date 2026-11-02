@@ -9,7 +9,8 @@ export type P2PMessage =
   | { type: 'STATE_SYNC'; payload: any }
   | { type: 'CLIENT_JOIN'; playerName?: string; deviceId?: string }
   | { type: 'SCREEN_JOIN' } // a big-screen stream view that only watches
-  | { type: 'CLIENT_BUZZ'; contestantId: string; timestamp: number }
+  // reactionMs: how long after this phone showed the open buzzer the player tapped (for clueId).
+  | { type: 'CLIENT_BUZZ'; contestantId: string; timestamp: number; reactionMs?: number; clueId?: string }
   | { type: 'CLIENT_ANSWER'; contestantId: string; answer: string; alternatives?: string[] }
   | { type: 'CLIENT_SELECT_CLUE'; contestantId: string; catIdx: number; clueIdx: number }
   | { type: 'CLIENT_SET_WAGER'; contestantId: string; wager: number; lockIn?: boolean }

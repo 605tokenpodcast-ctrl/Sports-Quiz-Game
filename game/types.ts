@@ -42,6 +42,7 @@ export interface Contestant {
   hardTries?: number;
   voiceRight?: number; // right answers given with the mic
   voiceTries?: number;
+  streak?: number; // right answers in a row, broken by a miss or by someone else getting one right
 }
 
 /** The biggest single win of the match, for the recap. */

@@ -1,6 +1,7 @@
 // The top bar: show logo, round, scores and the sound and menu buttons.
 import React from 'react';
-import {Menu as MenuIcon, Trophy, Users, Star, Edit3} from 'lucide-react';
+import {Menu as MenuIcon, Trophy, Users, Star, Edit3, Flame} from 'lucide-react';
+import {isOnFire} from '../game/rules';
 import {gameAudio} from '../utils/helper';
 import {useGame} from '../game/GameContext';
 
@@ -114,6 +115,7 @@ export default function Scoreboard() {
                       <span>{c.shortName}</span>
                       {cid === 'player' && hostPlays && !isBuzzed && <Edit3 className="w-2 h-2 text-amber-400/70 ml-0.5" />}
                       {isSelector && !isBuzzed && <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />}
+                      {isOnFire(c) && <Flame className="w-2.5 h-2.5 fill-orange-500 text-orange-400" aria-label={`${c.streak} in a row`} />}
                     </div>
                     <div
                       className={`text-[10px] sm:text-xs md:text-sm font-black font-mono tracking-tight ${

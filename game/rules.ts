@@ -21,6 +21,19 @@ export const TIMES = {
  * so tapping over and over doesn't beat waiting for the light.
  */
 export const EARLY_BUZZ_LOCKOUT_MS = 250;
+/**
+ * When a phone's buzz counts as pressed, on the host's clock. A phone sees the buzzer light up
+ * a network trip after the host does, so judging by arrival time (even minus the trip back)
+ * favors a player on the host device. Instead each phone reports its reaction time from when
+ * it showed the light, and the host adds that to when it opened the buzzers: everyone is
+ * timed from the moment they could see the light. Older phones without a reaction time fall
+ * back to arrival time minus the one-way delay.
+ */
+export function remoteBuzzTime(openedAt: number, arrivedAt: number, oneWayDelayMs: number, reactionMs?: number): number {
+  if (reactionMs === undefined || !Number.isFinite(reactionMs) || reactionMs < 0) return arrivedAt - oneWayDelayMs;
+  return Math.min(arrivedAt, openedAt + reactionMs);
+}
+
 /** True when a buzz pressed at `pressedAt` falls inside an early-buzz lockout that ends at `lockedUntil`. */
 export const inEarlyBuzzLockout = (pressedAt: number, lockedUntil: number | undefined) =>
   lockedUntil !== undefined && pressedAt < lockedUntil;
@@ -71,6 +84,27 @@ export function aiSettings(difficulty: AIDifficulty): AISettings {
       return {coachSpeed: 2.3, analystSpeed: 2.1, coachAcc: 0.68, analystAcc: 0.72};
   }
 }
+
+
+/** Categories each AI is especially good at: Coach Dave knows coaches, big games and teams; Stats Riley knows numbers and players. */
+const AI_SPECIALTIES: Record<'coach' | 'analyst', RegExp> = {
+  coach: /^nfl_(super_bowl|conference_title|head_coaches|stadiums|records$|franchises|blockbuster_trades)/,
+  analyst: /^nfl_(passing|rushing|receiving)_leaders|^nfl_(this_season|this_week|combine|stars_now|records_legends|playoff_qbs|who_am_i)/,
+};
+
+/**
+ * How likely an AI player is to answer a clue right. `base` is its accuracy for the game's
+ * difficulty on an average ($600-level) clue. Easier clues go up and harder ones down, by
+ * about 8 points a level, and the AI's specialties add 10 points.
+ */
+export function aiCorrectChance(base: number, who: 'coach' | 'analyst', difficulty: number, categoryId = ''): number {
+  const level = Math.min(5, Math.max(1, difficulty || 3));
+  const specialty = AI_SPECIALTIES[who].test(categoryId) ? 0.1 : 0;
+  return Math.min(0.98, Math.max(0.15, base + (3 - level) * 0.08 + specialty));
+}
+
+/** An AI only buzzes in when it thinks it knows: always when it's sure, less often on a long shot. */
+export const aiBuzzChance = (correctChance: number) => Math.min(1, 0.3 + correctChance * 0.8);
 
 // --- Wagers -----------------------------------------------------------------------------
 
@@ -161,6 +195,23 @@ export function trackAnswer(
   if (how.byVoice) {
     next.voiceTries = (c.voiceTries || 0) + 1;
     if (correct) next.voiceRight = (c.voiceRight || 0) + 1;
+  }
+  return next;
+}
+
+/** A run this long or longer is a hot streak: a flame on the podium and a call from the host voice. */
+export const HOT_STREAK = 3;
+export const isOnFire = (c: Pick<Contestant, 'streak'>) => (c.streak || 0) >= HOT_STREAK;
+
+/**
+ * Updates everyone's streak after `who` answers: a right answer adds one to theirs and ends
+ * everyone else's run, a miss ends theirs.
+ */
+export function updateStreaks<T extends Record<string, Contestant>>(all: T, who: keyof T, correct: boolean): T {
+  const next = {...all};
+  for (const id of Object.keys(all) as (keyof T)[]) {
+    const streak = id === who ? (correct ? (all[id].streak || 0) + 1 : 0) : correct ? 0 : all[id].streak || 0;
+    if (streak !== (all[id].streak || 0)) next[id] = {...all[id], streak};
   }
   return next;
 }

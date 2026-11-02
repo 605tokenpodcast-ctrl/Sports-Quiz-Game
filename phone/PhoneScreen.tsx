@@ -46,6 +46,8 @@ export default function PhoneScreen() {
     finalAnswerByVoice,
     activeContestantsList,
     shareRecap,
+    categoryIntro,
+    sendClientBuzz,
   } = useGame();
     const isPlayer2Selector = activeSelector === mySeat;
     const isPlayer2Buzzed = activeClue?.buzzedContestantId === mySeat;
@@ -163,7 +165,7 @@ export default function PhoneScreen() {
                 <button
                   onClick={() => {
                     if (tooEarly) return;
-                    p2pRef.current?.send({type: 'CLIENT_BUZZ', contestantId: mySeat, timestamp: Date.now()});
+                    sendClientBuzz();
                     setTooEarly(true);
                     window.setTimeout(() => setTooEarly(false), EARLY_BUZZ_LOCKOUT_MS + 150);
                   }}
@@ -187,11 +189,7 @@ export default function PhoneScreen() {
                         if (typeof navigator !== 'undefined' && navigator.vibrate) {
                           navigator.vibrate(80);
                         }
-                        p2pRef.current?.send({
-                          type: 'CLIENT_BUZZ',
-                          contestantId: mySeat,
-                          timestamp: Date.now(),
-                        });
+                        sendClientBuzz();
                       }}
                       className="w-full min-h-[140px] rounded-3xl bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-400 text-slate-950 font-black text-2xl tracking-widest uppercase shadow-2xl border-4 border-white active:scale-90 transition-transform flex flex-col items-center justify-center gap-2 animate-pulse cursor-pointer">
                       <Zap className="w-12 h-12 fill-slate-950 text-slate-950" />
@@ -344,7 +342,19 @@ export default function PhoneScreen() {
           {/* 3. Board Control & Tile Selection for Player 2 */}
           {gameState.status === 'PLAYING' && !activeClue && currentRound !== 'FINAL_SHOWDOWN' && (
             <div className="w-full flex flex-col items-center gap-3">
-              {isPlayer2Selector ? (
+              {categoryIntro ? (
+                // The round's categories are being revealed: list them as they're read out.
+                <div className="w-full bg-slate-900 border-2 border-amber-400 rounded-2xl p-3 text-center">
+                  <div className="text-xs font-black text-amber-300 uppercase mb-2">This round's categories</div>
+                  <div className="flex flex-col gap-1.5">
+                    {board.slice(0, categoryIntro.shown).map((cat) => (
+                      <div key={cat.title} className="px-2 py-1.5 bg-blue-950 rounded-lg border border-blue-800 text-sm font-black text-amber-300 uppercase">
+                        {cat.title}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : isPlayer2Selector ? (
                 <div className="w-full bg-slate-900 border-2 border-emerald-400 rounded-2xl p-3 text-center">
                   <div className="text-xs font-black text-emerald-400 uppercase flex items-center justify-center gap-1.5 mb-2">
                     <Star className="w-4 h-4 fill-emerald-400" />

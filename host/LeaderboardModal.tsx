@@ -14,6 +14,7 @@ import {
   TIER_OPTIONS,
 } from '../utils/leaderboard';
 import {useGame} from '../game/GameContext';
+import {SeasonTable} from '../ui/shared';
 
 export default function LeaderboardModal() {
   const {
@@ -39,6 +40,8 @@ export default function LeaderboardModal() {
     openTagEditorModal,
     displayedLeaderboardEntries,
     myBestRecord,
+    seasonRows,
+    startNewSeason,
   } = useGame();
   const backupInputRef = useRef<HTMLInputElement>(null);
 
@@ -79,6 +82,27 @@ export default function LeaderboardModal() {
                 className="min-w-[40px] min-h-[40px] px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors">
                 CLOSE
               </button>
+            </div>
+
+            {/* Podcast season standings: every game played on this device since the season started */}
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/40 mb-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-black text-amber-400 uppercase">Season standings</span>
+                {seasonRows.length > 0 && (
+                  <button
+                    onClick={() => {
+                      if (window.confirm('Start a new season? This clears the season standings (high scores stay).')) startNewSeason();
+                    }}
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] font-bold">
+                    Start new season
+                  </button>
+                )}
+              </div>
+              {seasonRows.length ? (
+                <SeasonTable rows={seasonRows} />
+              ) : (
+                <div className="text-[11px] text-slate-500 italic">No games yet this season. Every finished game adds to it.</div>
+              )}
             </div>
 
             {/* Player Name / Tag Profiler Bar */}

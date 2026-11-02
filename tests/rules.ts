@@ -21,7 +21,13 @@ import {
   trackAnswer,
   EARLY_BUZZ_LOCKOUT_MS,
   inEarlyBuzzLockout,
+  aiCorrectChance,
+  aiBuzzChance,
+  updateStreaks,
+  isOnFire,
+  remoteBuzzTime,
 } from '../game/rules';
+import {streakLine} from '../utils/speech';
 import {recapAwards} from '../game/recap';
 import type {ActiveClueState, Contestant, ContestantId} from '../game/types';
 
@@ -201,6 +207,43 @@ check('an early buzz locks that player out briefly, then the buzzer works again'
   assert.equal(inEarlyBuzzLockout(1100, until), true);
   assert.equal(inEarlyBuzzLockout(until + 1, until), false);
   assert.equal(inEarlyBuzzLockout(1100, undefined), false);
+});
+
+check('AI players miss more on hard clues and do better in their specialty', () => {
+  const easy = aiCorrectChance(0.7, 'coach', 1, 'nfl_draft_steals');
+  const hard = aiCorrectChance(0.7, 'coach', 5, 'nfl_draft_steals');
+  assert.ok(easy > hard + 0.25, `easy ${easy} vs hard ${hard}`);
+  assert.ok(aiCorrectChance(0.7, 'coach', 3, 'nfl_super_bowl') > aiCorrectChance(0.7, 'analyst', 3, 'nfl_super_bowl'));
+  assert.ok(aiCorrectChance(0.7, 'analyst', 3, 'nfl_passing_leaders') > aiCorrectChance(0.7, 'coach', 3, 'nfl_passing_leaders'));
+  assert.ok(aiCorrectChance(0.96, 'analyst', 1, 'nfl_this_week') <= 0.98);
+  assert.ok(aiCorrectChance(0.45, 'coach', 5) >= 0.15);
+  assert.ok(aiBuzzChance(hard) < aiBuzzChance(easy));
+});
+
+check('hot streaks: three right in a row, ended by a miss or a rival right answer', () => {
+  let all = {player: person('player', 'Ann', {}), player2: person('player2', 'Bo', {})} as Record<'player' | 'player2', Contestant>;
+  for (let i = 0; i < 3; i++) all = updateStreaks(all, 'player', true);
+  assert.equal(isOnFire(all.player), true);
+  assert.equal(streakLine('Ann', 3), 'Ann is heating up!');
+  assert.equal(streakLine('Ann', 4), '');
+  all = updateStreaks(all, 'player2', false);
+  assert.equal(all.player.streak, 3, "a rival's miss doesn't end the run");
+  all = updateStreaks(all, 'player2', true);
+  assert.equal(all.player.streak, 0, "a rival's right answer ends it");
+  all = updateStreaks(all, 'player2', false);
+  assert.equal(all.player2.streak, 0, 'a miss ends your own run');
+});
+
+check("a phone's buzz is timed from when it showed the light, so the host player has no head start", () => {
+  // Buzzers open at 1000 on the host. The phone sees the light 80 ms later and taps 200 ms after that;
+  // the tap reaches the host at 1360. The host's own player tapping 250 ms after the light (1250) is slower.
+  const phone = remoteBuzzTime(1000, 1360, 80, 200);
+  assert.equal(phone, 1200);
+  assert.ok(phone < 1250, 'the faster reaction wins');
+  // No reaction time (an early tap, or an older phone): arrival minus the one-way delay.
+  assert.equal(remoteBuzzTime(1000, 1360, 80), 1280);
+  // A reaction time can never place the buzz after it arrived.
+  assert.equal(remoteBuzzTime(1000, 1100, 50, 900), 1100);
 });
 
 if (failed) process.exit(1);

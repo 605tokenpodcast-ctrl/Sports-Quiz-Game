@@ -6,8 +6,9 @@ import BackgroundMusic from '../utils/BackgroundMusic';
 import TimeLeft from '../utils/TimeLeft';
 import {gameAudio} from '../utils/helper';
 import {unlockSpeech, isSpeechSupported} from '../utils/speech';
-import {QRCodeView} from '../ui/shared';
+import {QRCodeView, SeasonTable} from '../ui/shared';
 import type {ContestantId} from '../game/types';
+import {isOnFire} from '../game/rules';
 import {useGame} from '../game/GameContext';
 
 const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString()}`;
@@ -55,6 +56,7 @@ export default function StreamScreen() {
     activeBgmUrl,
     readAloud,
     toastMessage,
+    categoryIntro,
   } = game;
   // Browsers keep a page silent until someone taps it, so the screen starts with one tap.
   const [started, setStarted] = useState(false);
@@ -163,13 +165,25 @@ export default function StreamScreen() {
               {aiThinkingStatus && <span className="text-amber-400 animate-pulse">{aiThinkingStatus}</span>}
             </div>
             <div className={`shrink-0 grid ${boardColsClass} gap-2`}>
-              {board.map((cat) => (
-                <div
-                  key={cat.title}
-                  className="min-h-[clamp(44px,11vh,90px)] bg-gradient-to-b from-blue-800 to-blue-950 border-2 border-blue-500 rounded-lg p-1.5 flex items-center justify-center text-center">
-                  <span className="text-[clamp(0.75rem,min(1.5vw,2.6vh),1.8rem)] font-black text-amber-300 uppercase leading-tight">{cat.title}</span>
-                </div>
-              ))}
+              {board.map((cat, catIdx) => {
+                // The category reveal shows the columns one at a time, the newest one lit up.
+                const hidden = Boolean(categoryIntro && catIdx >= categoryIntro.shown);
+                const newest = Boolean(categoryIntro && catIdx === categoryIntro.shown - 1);
+                return (
+                  <div
+                    key={cat.title}
+                    className={`min-h-[clamp(44px,11vh,90px)] bg-gradient-to-b from-blue-800 to-blue-950 border-2 rounded-lg p-1.5 flex flex-col items-center justify-center text-center transition-all duration-500 ${
+                      newest ? 'border-amber-300 ring-4 ring-amber-300/60 scale-105' : 'border-blue-500'
+                    }`}>
+                    <span className={`text-[clamp(0.75rem,min(1.5vw,2.6vh),1.8rem)] font-black text-amber-300 uppercase leading-tight transition-opacity duration-500 ${hidden ? 'opacity-0' : 'opacity-100'}`}>
+                      {cat.title}
+                    </span>
+                    {newest && cat.description && (
+                      <span className="text-[clamp(0.6rem,min(1vw,1.8vh),1rem)] text-slate-200 leading-tight mt-1">{cat.description}</span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <div
               className={`grid ${boardColsClass} gap-2 flex-1 min-h-0`}
@@ -340,7 +354,7 @@ function ClueOverlay() {
 }
 
 function FinalPanel() {
-  const {finalClue, finalShowdownPhase, finalTimer, finalOptions, finalLocks, contestants, activeContestantsList, player3Human} = useGame();
+  const {finalClue, finalShowdownPhase, finalTimer, finalOptions, finalLocks, contestants, activeContestantsList, player3Human, finalReveal, finalShownFor} = useGame();
   return (
     <div className="w-full max-w-[1400px] max-h-full overflow-y-auto bg-slate-900/95 border-4 border-amber-500 rounded-3xl p-6 lg:p-10 flex flex-col items-center gap-6 text-center">
       <div className="flex items-center gap-3 text-4xl lg:text-6xl font-black text-amber-400 uppercase tracking-widest">
@@ -398,10 +412,20 @@ function FinalPanel() {
 
       {finalShowdownPhase === 'RESULTS' && (
         <>
-          <div className="text-3xl lg:text-4xl font-black text-emerald-300">Answer: {finalClue?.correctAnswer}</div>
+          <div className="text-3xl lg:text-4xl font-black text-emerald-300">
+            {finalReveal ? <span className="text-amber-300 animate-pulse">Revealing the answers...</span> : <>Answer: {finalClue?.correctAnswer}</>}
+          </div>
           <div className="w-full grid grid-cols-3 gap-4">
             {activeContestantsList.map((id) => {
               const c = contestants[id];
+              if (!finalShownFor(id)) {
+                return (
+                  <div key={id} className="rounded-2xl border-2 p-5 bg-blue-950/80 border-blue-500 text-blue-100">
+                    <div className="text-xl font-black uppercase">{c.name}</div>
+                    <div className="text-5xl font-black my-2">?</div>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={id}
@@ -428,7 +452,7 @@ function FinalPanel() {
 }
 
 function Results() {
-  const {contestants, activeContestantsList, recapMomentsList, recapAwardsList, shareRecap} = useGame();
+  const {contestants, activeContestantsList, recapMomentsList, recapAwardsList, shareRecap, seasonRows} = useGame();
   const standings = activeContestantsList.map((id) => contestants[id]).sort((a, b) => b.score - a.score);
   const winners = standings.filter((c) => c.score === standings[0]?.score);
   return (
@@ -457,6 +481,12 @@ function Results() {
               <div className="text-base text-slate-300">{a.detail}</div>
             </div>
           ))}
+        </div>
+      )}
+      {seasonRows.length > 0 && (
+        <div className="w-full bg-slate-950/80 border-2 border-blue-800 rounded-2xl p-4">
+          <div className="text-2xl font-black text-amber-400 uppercase mb-2">Season standings</div>
+          <SeasonTable rows={seasonRows} big />
         </div>
       )}
       {recapMomentsList.length > 0 && (
@@ -497,6 +527,12 @@ function Podium({id}: {id: ContestantId}) {
       <div className="px-4 py-[clamp(0.15rem,0.8vh,0.5rem)] flex items-center justify-center gap-2 text-[clamp(1rem,2.8vh,1.5rem)] font-black uppercase truncate">
         {control && <Star className="w-5 h-5 fill-amber-400 text-amber-400 shrink-0" />}
         <span className="truncate">{c.name}</span>
+        {isOnFire(c) && (
+          <span className="flex items-center text-orange-400 shrink-0 animate-pulse" title={`${c.streak} in a row`}>
+            <Flame className="w-6 h-6 fill-orange-500" />
+            {c.streak}
+          </span>
+        )}
       </div>
       <div className={`pb-[clamp(0.15rem,1vh,0.75rem)] text-center font-mono font-black text-[clamp(1.25rem,4.4vh,2.25rem)] ${c.score >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
         {money(c.score)}
