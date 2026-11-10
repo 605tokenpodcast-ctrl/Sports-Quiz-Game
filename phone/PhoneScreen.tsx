@@ -3,7 +3,7 @@ import React from 'react';
 import {Trophy, Zap, Clock, Flame, Star, Smartphone, Wifi, Gamepad2, ArrowLeft, Lock, Share2} from 'lucide-react';
 import TimeLeft from '../utils/TimeLeft';
 import {ContestantId, isOpenAnswerMode, seatLabel} from '../game/types';
-import {maxDailyDoubleWager, maxFinalWager, EARLY_BUZZ_LOCKOUT_MS} from '../game/rules';
+import {maxDailyDoubleWager, maxFinalWager, EARLY_BUZZ_LOCKOUT_MS, shownClueText, currentWorth, hintCount} from '../game/rules';
 import VoiceAnswerButton, {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {FinalChoices} from '../ui/shared';
 import {useGame} from '../game/GameContext';
@@ -152,7 +152,7 @@ export default function PhoneScreen() {
                 <div className="flex items-center justify-between border-b border-blue-800 pb-2 mb-2">
                   <span className="text-xs font-black text-amber-400 uppercase">{activeClue.clue.category}</span>
                   <span className="text-xs font-black text-amber-300 bg-blue-950 px-2 py-0.5 rounded border border-blue-700">
-                    ${activeClue.isBonusWager ? activeClue.bonusWagerInput : activeClue.clue.value}
+                    ${currentWorth(activeClue)}
                     {activeClue.isBonusWager && <span className="ml-1 text-amber-400">DAILY DOUBLE</span>}
                   </span>
                 </div>
@@ -170,7 +170,12 @@ export default function PhoneScreen() {
                   </div>
                 ) : (
                   <p className="text-sm sm:text-base font-semibold text-slate-100 leading-snug mb-2">
-                    {activeClue.clue.clue}
+                    {hintCount(activeClue) > 0 && activeClue.phase !== 'REVEALED' && (
+                      <span className="block text-[10px] font-black text-amber-400 uppercase mb-1">
+                        Hint {activeClue.hintsShown ?? 1} of {hintCount(activeClue)}
+                      </span>
+                    )}
+                    {shownClueText(activeClue)}
                   </p>
                 )}
 

@@ -8,7 +8,7 @@ import {gameAudio} from '../utils/helper';
 import {unlockSpeech, isSpeechSupported} from '../utils/speech';
 import {QRCodeView, SeasonTable} from '../ui/shared';
 import type {ContestantId} from '../game/types';
-import {isOnFire} from '../game/rules';
+import {isOnFire, shownClueText, currentWorth, hintCount} from '../game/rules';
 import {useGame} from '../game/GameContext';
 
 const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString()}`;
@@ -291,7 +291,7 @@ function ClueOverlay() {
         <div className="flex items-center justify-between gap-4 text-[clamp(1rem,3.6vh,1.875rem)] font-black uppercase">
           <span className="text-amber-300">{clue.category}</span>
           <span className="text-amber-400">
-            {activeClue.isBonusWager ? `Daily Double · ${money(activeClue.bonusWagerInput)}` : money(clue.value)}
+            {activeClue.isBonusWager ? `Daily Double · ${money(activeClue.bonusWagerInput)}` : money(currentWorth(activeClue))}
           </span>
         </div>
 
@@ -302,7 +302,14 @@ function ClueOverlay() {
             <div className="text-2xl lg:text-3xl text-slate-200">{picker?.name} is placing a wager...</div>
           </div>
         ) : (
-          <div className="text-[clamp(1.2rem,min(3.4vw,6vh),4.2rem)] font-bold leading-snug text-center text-white">{clue.clue}</div>
+          <div className="text-[clamp(1.2rem,min(3.4vw,6vh),4.2rem)] font-bold leading-snug text-center text-white">
+            {hintCount(activeClue) > 0 && activeClue.phase !== 'REVEALED' && (
+              <div className="text-[0.5em] font-black text-amber-400 uppercase tracking-widest mb-2">
+                Who Am I? Hint {activeClue.hintsShown ?? 1} of {hintCount(activeClue)}
+              </div>
+            )}
+            {shownClueText(activeClue)}
+          </div>
         )}
 
         {!hidden && activeClue.options.length > 0 && (

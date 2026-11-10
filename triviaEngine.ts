@@ -29,6 +29,8 @@ export interface QuestionClue {
    * give away another's answer.
    */
   subjects?: string[];
+  /** Who Am I?: the clue as hints, hardest first, shown one at a time as the tile's value drops. */
+  hints?: string[];
 }
 
 export interface TriviaCategory {
@@ -324,6 +326,7 @@ export interface CategorySpec {
     distractors: string[];
     aliases?: string[];
     difficulty: number;
+    hints?: string[];
   }[];
 }
 
@@ -411,6 +414,7 @@ export function getAllCompiledCategories(): TriviaCategory[] {
         aliases: answerAliases(cleanAnswer, raw.aliases || [], isCollege),
         sport: spec.sport,
         difficulty: raw.difficulty,
+        ...(raw.hints && raw.hints.length > 1 ? {hints: raw.hints.map(sanitizeQuestionClue)} : {}),
       });
 
     });

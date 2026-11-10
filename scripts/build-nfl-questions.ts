@@ -131,6 +131,8 @@ interface Entry {
   distractors: string[];
   aliases: string[];
   difficulty: number;
+  /** Who Am I?: the clue split into hints, hardest first, shown one at a time in a game. */
+  hints?: string[];
 }
 
 interface Category {
@@ -1001,9 +1003,18 @@ async function main() {
     // Who Am I: two or three hints, the player is the answer.
     if (feats.length) {
       const where = starred && starred !== nickname(team) ? ` but made his name with the ${starred}` : '';
+      const before = whoCat.entries.length;
       add(whoCat, `who_${pid}_${y}`,
         `This ${from}${pos} was ${slot} of the ${nickname(team)} in ${y}${where}, then ${joinAnd(feats)}.`, player,
         pickDistractors(player, shuffle(peers, `whop${pid}`).slice(0, 7), [], `who${pid}`), 2 + fame, nameAliases(player));
+      // Hardest first: what he did, then when he was drafted, then by whom and from where.
+      if (whoCat.entries.length > before) {
+        whoCat.entries[before].hints = [
+          `This ${pos} ${joinAnd(feats)}.`,
+          `He was ${slot} in ${y}${where ? `, and${where.replace(' but', '')}` : ''}.`,
+          `The ${nickname(team)} drafted him${d.college ? ` out of ${d.college}` : ''}.`,
+        ];
+      }
     }
 
     const cat = category(`drafted_by_${decade}`, `Draft Day: ${decade}`, `Which team drafted the stars of the ${decade}.`);

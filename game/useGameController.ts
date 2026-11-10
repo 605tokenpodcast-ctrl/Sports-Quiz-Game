@@ -87,6 +87,10 @@ import {
   aiCorrectChance,
   aiBuzzChance,
   updateStreaks,
+  HINT_SECONDS,
+  hintCount,
+  shownClueText,
+  currentWorth,
 } from './rules';
 import {
   AnswerFormat,
@@ -117,9 +121,9 @@ export const categoryIntroLines = (round: RoundType, board: {title: string; desc
     return `${opener}${cat.title}.${about}`;
   });
 
-const spokenClue = (clue: QuestionClue): SpeechPart[] => [
+const spokenClue = (clue: QuestionClue, text = clue.clue): SpeechPart[] => [
   {text: `${clue.category}, for ${spokenMoney(clue.value)}!`, hype: true},
-  clue.clue,
+  text,
 ];
 const spokenFinal = (clue: QuestionClue): SpeechPart[] => [
   {text: `Final Showdown! The category: ${clue.category}.`, hype: true},
@@ -716,7 +720,10 @@ export function useGameController() {
         ...(isBonus
           ? frozenCountdown(TIMES.dailyDouble)
           : startCountdown(
-              readAloud ? readingSeconds(partsText(spokenClue(clue)), SETTINGS.buzzerLightDelay, speechRate()) : SETTINGS.buzzerLightDelay,
+              // A Who Am I? clue reads only its first hint before the buzzers open.
+              readAloud
+                ? readingSeconds(partsText(spokenClue(clue, clue.hints && clue.hints.length > 1 ? clue.hints[0] : clue.clue)), SETTINGS.buzzerLightDelay, speechRate())
+                : SETTINGS.buzzerLightDelay,
               Date.now()
             )),
         options,
@@ -909,6 +916,8 @@ export function useGameController() {
       ...startCountdown(seconds, Date.now()),
       phase: 'ANSWERING',
       buzzedContestantId: contestantId,
+      // A Who Am I? clue is worth what it was when they buzzed, before the next hint lowers it.
+      ...(hintCount(current) ? {stakeAtBuzz: currentWorth(current)} : {}),
       buzzMs: Math.max(0, pressedAt - buzzersOpenedAtRef.current),
       feedbackText: isAI
         ? `${name} buzzed in!`
@@ -1611,8 +1620,11 @@ export function useGameController() {
     const analystCanBuzz = !player3Human && !activeClue.buzzerLockout.analyst && knows('analyst');
 
     const reflexMult = SETTINGS.aiReflexSpeedMultiplier;
-    const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult;
-    const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult;
+    // On a Who Am I? clue an AI may wait for a hint or two before it's sure.
+    const hints = hintCount(activeClue);
+    const hintWait = () => (hints ? Math.floor(Math.random() * hints) * HINT_SECONDS * 1000 : 0);
+    const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait();
+    const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait();
 
     const timeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -1628,6 +1640,23 @@ export function useGameController() {
       timeouts.forEach((t) => clearTimeout(t));
     };
   }, [deviceRole, activeClue?.phase, activeClue?.buzzerLockout, activeClue?.isBonusWager, aiConfig, isTwoPlayerMode, isClientConnected, player3Human]);
+
+  // Who Am I?: while the buzzers are open, a new hint shows every few seconds and the tile is worth less.
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || !activeClue || activeClue.phase !== 'BUZZER_OPEN' || activeClue.endsAt === null) return;
+    const total = hintCount(activeClue);
+    const shown = activeClue.hintsShown ?? 1;
+    if (!total || shown >= total) return;
+    const clueId = activeClue.clue.id;
+    const timer = setTimeout(() => {
+      const prev = activeClueRef.current;
+      if (!prev || prev.clue.id !== clueId || prev.phase !== 'BUZZER_OPEN') return;
+      const next = {...prev, hintsShown: (prev.hintsShown ?? 1) + 1};
+      commitClue({...next, feedbackText: `New hint! Now worth $${currentWorth(next).toLocaleString()}.`});
+    }, HINT_SECONDS * 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, activeClue?.clue.id, activeClue?.phase, activeClue?.hintsShown, activeClue?.endsAt === null]);
 
   // AI Answering logic when Coach or Analyst is answering (Host only, only once clue is revealed!)
   useEffect(() => {
@@ -1693,7 +1722,7 @@ export function useGameController() {
     if (!speaksHere || !activeClue) return;
     const {clue, phase} = activeClue;
     if (phase === 'READING') {
-      speak(spokenClue(clue), () => openBuzzersAfterReadingRef.current(clue.id));
+      speak(spokenClue(clue, shownClueText(activeClue)), () => openBuzzersAfterReadingRef.current(clue.id));
     } else if (phase === 'ANSWERING' && activeClue.isBonusWager) {
       if (activeClue.bonusWagerLocked) speak([{text: 'Here is your Daily Double.', hype: true}, clue.clue]);
     } else if (phase === 'ANSWERING') {
@@ -1707,6 +1736,14 @@ export function useGameController() {
     // Only when the clue moves to a new phase.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speaksHere, activeClue?.clue.id, activeClue?.phase, activeClue?.bonusWagerLocked]);
+
+  // The newest hint is read out as it appears.
+  useEffect(() => {
+    if (!speaksHere || !activeClue || activeClue.phase !== 'BUZZER_OPEN' || !hintCount(activeClue)) return;
+    const shown = activeClue.hintsShown ?? 1;
+    if (shown > 1) speak(activeClue.clue.hints![shown - 1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speaksHere, activeClue?.clue.id, activeClue?.hintsShown]);
 
   // Read each column out as the category reveal shows it.
   useEffect(() => {

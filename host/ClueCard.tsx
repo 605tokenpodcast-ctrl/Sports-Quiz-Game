@@ -3,7 +3,7 @@ import {Zap, Clock, DollarSign, Star} from 'lucide-react';
 import {gameAudio} from '../utils/helper';
 import TimeLeft from '../utils/TimeLeft';
 import {isOpenAnswerMode} from '../game/types';
-import {maxDailyDoubleWager} from '../game/rules';
+import {maxDailyDoubleWager, shownClueText, currentWorth, hintCount} from '../game/rules';
 import VoiceAnswerButton, {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {useGame} from '../game/GameContext';
 
@@ -37,7 +37,7 @@ export default function ClueCard() {
                 </span>
                 <span className="text-xs sm:text-sm font-black text-amber-300 bg-blue-950 px-2 py-0.5 rounded-full border border-blue-700 flex items-center gap-0.5">
                   <DollarSign className="w-3.5 h-3.5" />
-                  {activeClue.isBonusWager ? activeClue.bonusWagerInput : activeClue.clue.value}
+                  {currentWorth(activeClue)}
                   {activeClue.isBonusWager && (
                     <span className="text-[9px] text-amber-400 font-bold ml-0.5">DAILY DOUBLE</span>
                   )}
@@ -111,8 +111,13 @@ export default function ClueCard() {
               </div>
             ) : (
               <div className="w-full bg-slate-950/90 border border-blue-900/80 rounded-xl p-3 sm:p-5 short:p-2 mb-3 short:mb-1.5 transition-all duration-300">
+                {hintCount(activeClue) > 0 && activeClue.phase !== 'REVEALED' && (
+                  <div className="text-[10px] sm:text-xs font-black text-amber-400 uppercase tracking-wider mb-1">
+                    Hint {activeClue.hintsShown ?? 1} of {hintCount(activeClue)}
+                  </div>
+                )}
                 <p className="text-sm sm:text-lg md:text-xl short:text-sm font-semibold text-slate-100 leading-relaxed drop-shadow-sm">
-                  {activeClue.clue.clue}
+                  {shownClueText(activeClue)}
                 </p>
               </div>
             )}
