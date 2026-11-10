@@ -17,6 +17,7 @@ import {
   markClueUsed,
   getSeenQuestionsCount,
   getSeenQuestionIds,
+  gameRandom,
   markQuestionSeen,
   resetSeenQuestions,
   getTotalAvailableQuestionCount,
@@ -252,7 +253,7 @@ export function getFreshFinalShowdownClue(
   // while this device still has some it hasn't seen.
   const handWritten = candidates.filter((q) => q.id.startsWith('final_'));
   const pool =
-    handWritten.length > 0 && Math.random() < 0.35
+    handWritten.length > 0 && gameRandom() < 0.35
       ? handWritten
       : candidates.length > 0
       ? candidates
@@ -260,7 +261,7 @@ export function getFreshFinalShowdownClue(
       ? fallbackCandidates
       : finalPool;
 
-  const picked = pool[Math.floor(Math.random() * pool.length)];
+  const picked = pool[Math.floor(gameRandom() * pool.length)];
 
   usedQuestionIds.add(picked.id);
   markClueUsed(picked, usedAnswers);

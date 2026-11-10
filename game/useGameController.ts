@@ -10,6 +10,7 @@ import {
   matchSpokenOption,
   pickSpokenTypedAnswer,
   createFullGameSession,
+  dealWith,
   getSeenQuestionsCount,
   getTotalAvailableQuestionCount,
   getTotalCategoryCount,
@@ -20,6 +21,7 @@ import {
   TriviaCategory,
 } from '../triviaData';
 import {useWakeLock} from '../utils/wakeLock';
+import {newEpisodeCode, normalizeEpisodeCode, episodeLength, seededRandom} from '../utils/episode';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
 import {
   answerLine,
@@ -205,7 +207,23 @@ export function useGameController() {
   const [difficulty, setDifficulty] = useState<AIDifficulty>('MEDIUM');
   const [answerMode, setAnswerMode] = useState<AnswerMode>('STANDARD');
   // Full: 6 categories x 5 clues per round. Short: 5 categories x 3 clues per round.
-  const [gameLength, setGameLength] = useState<GameLength>('FULL');
+  const [gameLength, setGameLengthState] = useState<GameLength>(() => {
+    const code = normalizeEpisodeCode(new URLSearchParams(window.location.search).get('episode') || '');
+    return code ? episodeLength(code) : 'FULL';
+  });
+  // Episode code: deals the same boards on any device (a link with ?episode=F-7KQ2 fills it in).
+  const [episodeCode, setEpisodeCodeState] = useState(() => normalizeEpisodeCode(new URLSearchParams(window.location.search).get('episode') || ''));
+  const setEpisodeCode = useCallback((input: string) => {
+    const code = normalizeEpisodeCode(input);
+    setEpisodeCodeState(code);
+    if (code) setGameLengthState(episodeLength(code));
+  }, []);
+  const makeEpisodeCode = useCallback(() => setEpisodeCodeState(newEpisodeCode(gameLength)), [gameLength]);
+  // Changing the game length drops a code made for the other length.
+  const setGameLength = useCallback((length: GameLength) => {
+    setGameLengthState(length);
+    setEpisodeCodeState((code) => (code && episodeLength(code) !== length ? '' : code));
+  }, []);
   const [isTwoPlayerMode, setIsTwoPlayerMode] = useState(false);
   // Whether this host device also plays as Player 1. Off, it only hosts (a laptop on the
   // stream) and all three players are on phones, with the first phone to join as P1.
@@ -590,29 +608,31 @@ export function useGameController() {
   // Setup Board data with strict session-wide deduplication & Daily Doubles
   // (1 in Round 1, 2 in Round 2; a short game has half the clues, so just 1 in Round 2)
   const initializeBoards = useCallback(() => {
-    const session = createFullGameSession(difficulty, gameLength);
+    // With an episode code every pick (columns, clues, Daily Doubles, the Final) comes from the code.
+    const random = episodeCode ? seededRandom(`${episodeCode}|${bankInfo?.dataThrough ?? ''}`) : Math.random;
+    const session = dealWith(episodeCode ? random : null, () => createFullGameSession(difficulty, gameLength));
     const r1 = session.round1Board;
     const r2 = session.round2Board;
     const r1Rows = r1[0]?.clues.length || 5;
     const r2Rows = r2[0]?.clues.length || 5;
 
     // 1 Daily Double hidden in Round 1
-    const r1Cat = Math.floor(Math.random() * r1.length);
-    const r1Clue = Math.floor(Math.random() * r1Rows);
+    const r1Cat = Math.floor(random() * r1.length);
+    const r1Clue = Math.floor(random() * r1Rows);
     if (r1[r1Cat]?.clues[r1Clue]) {
       r1[r1Cat].clues[r1Clue].isBonusWager = true;
     }
 
     // Daily Doubles hidden in Round 2, in different categories
-    const bonus1Cat = Math.floor(Math.random() * r2.length);
-    const bonus1Clue = Math.floor(Math.random() * r2Rows);
+    const bonus1Cat = Math.floor(random() * r2.length);
+    const bonus1Clue = Math.floor(random() * r2Rows);
     if (r2[bonus1Cat]?.clues[bonus1Clue]) {
       r2[bonus1Cat].clues[bonus1Clue].isBonusWager = true;
     }
 
     if (gameLength === 'FULL') {
-      let bonus2Cat = Math.floor(Math.random() * r2.length);
-      let bonus2Clue = Math.floor(Math.random() * r2Rows);
+      let bonus2Cat = Math.floor(random() * r2.length);
+      let bonus2Clue = Math.floor(random() * r2Rows);
       if (bonus2Cat === bonus1Cat && bonus2Clue === bonus1Clue) {
         bonus2Cat = (bonus1Cat + 2) % r2.length;
       }
@@ -641,7 +661,7 @@ export function useGameController() {
     // Set Final Clue from deduplicated session
     setFinalClue(session.finalClue);
     setSeenCountRefresh((c) => c + 1);
-  }, [difficulty, gameLength]);
+  }, [difficulty, gameLength, episodeCode, bankInfo]);
 
   // AI reflex and accuracy configuration
   const aiConfig = useMemo(() => aiSettings(difficulty), [difficulty]);
@@ -2267,6 +2287,9 @@ export function useGameController() {
     setAnswerMode,
     gameLength,
     setGameLength,
+    episodeCode,
+    setEpisodeCode,
+    makeEpisodeCode,
     isTwoPlayerMode,
     setIsTwoPlayerMode,
     gameState,

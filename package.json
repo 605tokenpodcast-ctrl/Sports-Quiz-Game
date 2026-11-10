@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules && npm run -s test:length && npm run -s test:leaderboard && npm run -s test:speech && npm run -s test:options && npm run -s test:bank && npm run -s test:season && npm run -s test:ice && npm run -s test:choices",
+    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules && npm run -s test:length && npm run -s test:leaderboard && npm run -s test:speech && npm run -s test:options && npm run -s test:bank && npm run -s test:season && npm run -s test:ice && npm run -s test:choices && npm run -s test:episode",
     "dev": "vite",
     "build": "vite build",
     "questions": "tsx scripts/build-nfl-questions.ts",
@@ -24,7 +24,8 @@
     "test:phone-fit": "node tests/phone-fit.mjs",
     "test:reconnect": "node tests/reconnect.mjs",
     "test:ice": "tsx tests/ice-servers.ts",
-    "test:choices": "tsx tests/wrong-choices.ts"
+    "test:choices": "tsx tests/wrong-choices.ts",
+    "test:episode": "tsx tests/episode.ts"
   },
   "keywords": [],
   "author": "",

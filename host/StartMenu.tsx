@@ -20,6 +20,9 @@ export default function StartMenu() {
     setAnswerMode,
     gameLength,
     setGameLength,
+    episodeCode,
+    setEpisodeCode,
+    makeEpisodeCode,
     isTwoPlayerMode,
     setIsTwoPlayerMode,
     gameState,
@@ -222,6 +225,40 @@ export default function StartMenu() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Episode code: the same boards on any device, so listeners can play the show's game */}
+            <div className="w-full mb-3 text-left">
+              <label htmlFor="episode-code" className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-1">
+                Episode Code <span className="normal-case font-normal text-slate-400">(optional: same boards for everyone)</span>
+              </label>
+              <div className="flex gap-1.5">
+                <input
+                  id="episode-code"
+                  key={episodeCode}
+                  defaultValue={episodeCode}
+                  onBlur={(e) => setEpisodeCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') setEpisodeCode((e.target as HTMLInputElement).value);
+                  }}
+                  placeholder="e.g. F-7KQ2"
+                  autoCapitalize="characters"
+                  className="flex-1 min-w-0 min-h-[44px] rounded-lg bg-slate-950/80 border border-slate-700 px-3 text-sm font-black tracking-widest text-white uppercase placeholder:font-normal placeholder:tracking-normal placeholder:normal-case placeholder:text-slate-500"
+                />
+                <button
+                  onClick={() => {
+                    gameAudio.playCrispClick();
+                    episodeCode ? setEpisodeCode('') : makeEpisodeCode();
+                  }}
+                  className="min-h-[44px] px-3 rounded-lg border border-slate-700 bg-slate-950/80 text-xs font-bold text-slate-200 hover:border-blue-500">
+                  {episodeCode ? 'Clear' : 'Make one'}
+                </button>
+              </div>
+              {episodeCode && (
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Read this code on the show. Anyone who enters it (or opens the link with ?episode={episodeCode}) gets the same boards until Tuesday's question refresh.
+                </p>
+              )}
             </div>
 
             {/* Answer Format Selector */}

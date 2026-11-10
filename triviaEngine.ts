@@ -555,7 +555,28 @@ function hydrateSeenStore(): void {
 
 export function getSeenQuestionIds(): Set<string> {
   hydrateSeenStore();
-  return SEEN_HASH_SET;
+  // An episode code deals the same boards everywhere, so what this device has seen can't matter.
+  return gameRandomSource ? NOTHING_SEEN : SEEN_HASH_SET;
+}
+const NOTHING_SEEN = new Set<string>();
+
+// While an episode code deals a game, every random pick comes from it instead of Math.random.
+let gameRandomSource: (() => number) | null = null;
+
+/** A random number for dealing a game: from the episode code when there is one. */
+export const gameRandom = () => (gameRandomSource ? gameRandomSource() : Math.random());
+
+/** Runs `deal` with every random pick taken from `random` (an episode code's), or Math.random when null. */
+export function dealWith<T>(random: (() => number) | null, deal: () => T): T {
+  // Prepare the questions first: that shuffles wrong answers, which must not use up the code's numbers.
+  getAllCompiledCategories();
+  const before = gameRandomSource;
+  gameRandomSource = random;
+  try {
+    return deal();
+  } finally {
+    gameRandomSource = before;
+  }
 }
 
 export function markQuestionSeen(id: string): void {
@@ -598,7 +619,7 @@ export function getSeenQuestionsCount(): number {
 export function fisherYatesShuffle<T>(items: T[]): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(gameRandom() * (i + 1));
     [result[i], result[j]] = [result[j], result[i]];
   }
   return result;
