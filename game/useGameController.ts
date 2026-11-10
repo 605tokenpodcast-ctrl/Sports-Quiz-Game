@@ -10,6 +10,7 @@ import {
   matchSpokenOption,
   pickSpokenTypedAnswer,
   createFullGameSession,
+  dealWith,
   getSeenQuestionsCount,
   getTotalAvailableQuestionCount,
   getTotalCategoryCount,
@@ -19,6 +20,8 @@ import {
   QuestionClue,
   TriviaCategory,
 } from '../triviaData';
+import {useWakeLock} from '../utils/wakeLock';
+import {newEpisodeCode, normalizeEpisodeCode, episodeLength, seededRandom} from '../utils/episode';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
 import {
   answerLine,
@@ -86,6 +89,10 @@ import {
   aiCorrectChance,
   aiBuzzChance,
   updateStreaks,
+  HINT_SECONDS,
+  hintCount,
+  shownClueText,
+  currentWorth,
 } from './rules';
 import {
   AnswerFormat,
@@ -116,9 +123,9 @@ export const categoryIntroLines = (round: RoundType, board: {title: string; desc
     return `${opener}${cat.title}.${about}`;
   });
 
-const spokenClue = (clue: QuestionClue): SpeechPart[] => [
+const spokenClue = (clue: QuestionClue, text = clue.clue): SpeechPart[] => [
   {text: `${clue.category}, for ${spokenMoney(clue.value)}!`, hype: true},
-  clue.clue,
+  text,
 ];
 const spokenFinal = (clue: QuestionClue): SpeechPart[] => [
   {text: `Final Showdown! The category: ${clue.category}.`, hype: true},
@@ -200,7 +207,23 @@ export function useGameController() {
   const [difficulty, setDifficulty] = useState<AIDifficulty>('MEDIUM');
   const [answerMode, setAnswerMode] = useState<AnswerMode>('STANDARD');
   // Full: 6 categories x 5 clues per round. Short: 5 categories x 3 clues per round.
-  const [gameLength, setGameLength] = useState<GameLength>('FULL');
+  const [gameLength, setGameLengthState] = useState<GameLength>(() => {
+    const code = normalizeEpisodeCode(new URLSearchParams(window.location.search).get('episode') || '');
+    return code ? episodeLength(code) : 'FULL';
+  });
+  // Episode code: deals the same boards on any device (a link with ?episode=F-7KQ2 fills it in).
+  const [episodeCode, setEpisodeCodeState] = useState(() => normalizeEpisodeCode(new URLSearchParams(window.location.search).get('episode') || ''));
+  const setEpisodeCode = useCallback((input: string) => {
+    const code = normalizeEpisodeCode(input);
+    setEpisodeCodeState(code);
+    if (code) setGameLengthState(episodeLength(code));
+  }, []);
+  const makeEpisodeCode = useCallback(() => setEpisodeCodeState(newEpisodeCode(gameLength)), [gameLength]);
+  // Changing the game length drops a code made for the other length.
+  const setGameLength = useCallback((length: GameLength) => {
+    setGameLengthState(length);
+    setEpisodeCodeState((code) => (code && episodeLength(code) !== length ? '' : code));
+  }, []);
   const [isTwoPlayerMode, setIsTwoPlayerMode] = useState(false);
   // Whether this host device also plays as Player 1. Off, it only hosts (a laptop on the
   // stream) and all three players are on phones, with the first phone to join as P1.
@@ -287,6 +310,9 @@ export function useGameController() {
     loadBank();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceRole]);
+
+  // Keep screens on in a room: a phone that locks mid-game drops out, and a host that sleeps freezes everyone.
+  useWakeLock(deviceRole !== 'HOST' ? p2pStatus !== 'error' : gameState.status === 'PLAYING' || isClientConnected);
 
   // Anti-repeat question statistics
   const seenQuestionsCount = useMemo(() => {
@@ -582,29 +608,31 @@ export function useGameController() {
   // Setup Board data with strict session-wide deduplication & Daily Doubles
   // (1 in Round 1, 2 in Round 2; a short game has half the clues, so just 1 in Round 2)
   const initializeBoards = useCallback(() => {
-    const session = createFullGameSession(difficulty, gameLength);
+    // With an episode code every pick (columns, clues, Daily Doubles, the Final) comes from the code.
+    const random = episodeCode ? seededRandom(`${episodeCode}|${bankInfo?.dataThrough ?? ''}`) : Math.random;
+    const session = dealWith(episodeCode ? random : null, () => createFullGameSession(difficulty, gameLength));
     const r1 = session.round1Board;
     const r2 = session.round2Board;
     const r1Rows = r1[0]?.clues.length || 5;
     const r2Rows = r2[0]?.clues.length || 5;
 
     // 1 Daily Double hidden in Round 1
-    const r1Cat = Math.floor(Math.random() * r1.length);
-    const r1Clue = Math.floor(Math.random() * r1Rows);
+    const r1Cat = Math.floor(random() * r1.length);
+    const r1Clue = Math.floor(random() * r1Rows);
     if (r1[r1Cat]?.clues[r1Clue]) {
       r1[r1Cat].clues[r1Clue].isBonusWager = true;
     }
 
     // Daily Doubles hidden in Round 2, in different categories
-    const bonus1Cat = Math.floor(Math.random() * r2.length);
-    const bonus1Clue = Math.floor(Math.random() * r2Rows);
+    const bonus1Cat = Math.floor(random() * r2.length);
+    const bonus1Clue = Math.floor(random() * r2Rows);
     if (r2[bonus1Cat]?.clues[bonus1Clue]) {
       r2[bonus1Cat].clues[bonus1Clue].isBonusWager = true;
     }
 
     if (gameLength === 'FULL') {
-      let bonus2Cat = Math.floor(Math.random() * r2.length);
-      let bonus2Clue = Math.floor(Math.random() * r2Rows);
+      let bonus2Cat = Math.floor(random() * r2.length);
+      let bonus2Clue = Math.floor(random() * r2Rows);
       if (bonus2Cat === bonus1Cat && bonus2Clue === bonus1Clue) {
         bonus2Cat = (bonus1Cat + 2) % r2.length;
       }
@@ -633,7 +661,7 @@ export function useGameController() {
     // Set Final Clue from deduplicated session
     setFinalClue(session.finalClue);
     setSeenCountRefresh((c) => c + 1);
-  }, [difficulty, gameLength]);
+  }, [difficulty, gameLength, episodeCode, bankInfo]);
 
   // AI reflex and accuracy configuration
   const aiConfig = useMemo(() => aiSettings(difficulty), [difficulty]);
@@ -712,7 +740,10 @@ export function useGameController() {
         ...(isBonus
           ? frozenCountdown(TIMES.dailyDouble)
           : startCountdown(
-              readAloud ? readingSeconds(partsText(spokenClue(clue)), SETTINGS.buzzerLightDelay, speechRate()) : SETTINGS.buzzerLightDelay,
+              // A Who Am I? clue reads only its first hint before the buzzers open.
+              readAloud
+                ? readingSeconds(partsText(spokenClue(clue, clue.hints && clue.hints.length > 1 ? clue.hints[0] : clue.clue)), SETTINGS.buzzerLightDelay, speechRate())
+                : SETTINGS.buzzerLightDelay,
               Date.now()
             )),
         options,
@@ -905,6 +936,8 @@ export function useGameController() {
       ...startCountdown(seconds, Date.now()),
       phase: 'ANSWERING',
       buzzedContestantId: contestantId,
+      // A Who Am I? clue is worth what it was when they buzzed, before the next hint lowers it.
+      ...(hintCount(current) ? {stakeAtBuzz: currentWorth(current)} : {}),
       buzzMs: Math.max(0, pressedAt - buzzersOpenedAtRef.current),
       feedbackText: isAI
         ? `${name} buzzed in!`
@@ -919,7 +952,7 @@ export function useGameController() {
   // Phone: when this phone first showed the buzzer open for the current clue.
   const buzzerSeenRef = useRef<{clueId: string; at: number}>({clueId: '', at: 0});
   /** Phone: buzz in, with the reaction time since this phone showed the light (none if it hasn't yet). */
-  const sendClientBuzz = () => {
+  const sendClientBuzz = (early = false) => {
     const seen = buzzerSeenRef.current;
     const clueId = activeClueRef.current?.clue.id;
     p2pRef.current?.send({
@@ -928,6 +961,7 @@ export function useGameController() {
       timestamp: Date.now(),
       clueId,
       reactionMs: seen.clueId && seen.clueId === clueId ? Date.now() - seen.at : undefined,
+      early,
     });
   };
 
@@ -1062,7 +1096,8 @@ export function useGameController() {
             seats = {...seats};
             delete seats[stalePeer];
             remoteSeatsRef.current = seats;
-            const nextAway = {...awaySeatsRef.current, [staleSeat]: msg.playerName};
+            // Kept as away under its current name, so the phone gets its seat and name back below.
+            const nextAway = {...awaySeatsRef.current, [staleSeat]: contestantsRef.current[staleSeat].name};
             awaySeatsRef.current = nextAway;
             p2pRef.current?.disconnectPeer(stalePeer);
           }
@@ -1090,7 +1125,8 @@ export function useGameController() {
           setIsTwoPlayerMode(true);
           const label = seatLabel(seat);
           const rejoined = away[seat] !== undefined;
-          const wanted = msg.playerName || away[seat] || `Friend (${label})`;
+          // A phone coming back keeps the name it had (including a " 2" added to tell two Friends apart).
+          const wanted = (rejoined && away[seat]) || msg.playerName || `Friend (${label})`;
           // Two phones with the same name get their seat added, so the scoreboard tells them apart.
           const nameTaken = (Object.keys(contestantsRef.current) as (keyof typeof contestantsRef.current)[]).some(
             (id) => id !== seat && contestantsRef.current[id].name === wanted
@@ -1119,6 +1155,12 @@ export function useGameController() {
           case 'CLIENT_BUZZ': {
             // Timed from when that phone showed the light, so the host's own player has no head start.
             const current = activeClueRef.current;
+            // A tap made before the light is an early buzz even if it arrives after the buzzers opened,
+            // the same as on the host device. The phone already locked itself out for a moment.
+            if (msg.early) {
+              if (current?.phase === 'READING') handleContestantBuzz(seat, Date.now());
+              break;
+            }
             const sameOpening = current?.phase === 'BUZZER_OPEN' && msg.clueId === current.clue.id;
             handleContestantBuzz(
               seat,
@@ -1306,6 +1348,8 @@ export function useGameController() {
     );
 
     p2pRef.current = mgr;
+    // Lets the browser tests cut a phone's connection to check that it reconnects.
+    if (import.meta.env.DEV) (window as unknown as {__p2p?: P2PConnectionManager}).__p2p = mgr;
 
     return () => {
       mgr.destroy();
@@ -1596,8 +1640,11 @@ export function useGameController() {
     const analystCanBuzz = !player3Human && !activeClue.buzzerLockout.analyst && knows('analyst');
 
     const reflexMult = SETTINGS.aiReflexSpeedMultiplier;
-    const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult;
-    const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult;
+    // On a Who Am I? clue an AI may wait for a hint or two before it's sure.
+    const hints = hintCount(activeClue);
+    const hintWait = () => (hints ? Math.floor(Math.random() * hints) * HINT_SECONDS * 1000 : 0);
+    const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait();
+    const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait();
 
     const timeouts: ReturnType<typeof setTimeout>[] = [];
 
@@ -1613,6 +1660,23 @@ export function useGameController() {
       timeouts.forEach((t) => clearTimeout(t));
     };
   }, [deviceRole, activeClue?.phase, activeClue?.buzzerLockout, activeClue?.isBonusWager, aiConfig, isTwoPlayerMode, isClientConnected, player3Human]);
+
+  // Who Am I?: while the buzzers are open, a new hint shows every few seconds and the tile is worth less.
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || !activeClue || activeClue.phase !== 'BUZZER_OPEN' || activeClue.endsAt === null) return;
+    const total = hintCount(activeClue);
+    const shown = activeClue.hintsShown ?? 1;
+    if (!total || shown >= total) return;
+    const clueId = activeClue.clue.id;
+    const timer = setTimeout(() => {
+      const prev = activeClueRef.current;
+      if (!prev || prev.clue.id !== clueId || prev.phase !== 'BUZZER_OPEN') return;
+      const next = {...prev, hintsShown: (prev.hintsShown ?? 1) + 1};
+      commitClue({...next, feedbackText: `New hint! Now worth $${currentWorth(next).toLocaleString()}.`});
+    }, HINT_SECONDS * 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, activeClue?.clue.id, activeClue?.phase, activeClue?.hintsShown, activeClue?.endsAt === null]);
 
   // AI Answering logic when Coach or Analyst is answering (Host only, only once clue is revealed!)
   useEffect(() => {
@@ -1678,7 +1742,7 @@ export function useGameController() {
     if (!speaksHere || !activeClue) return;
     const {clue, phase} = activeClue;
     if (phase === 'READING') {
-      speak(spokenClue(clue), () => openBuzzersAfterReadingRef.current(clue.id));
+      speak(spokenClue(clue, shownClueText(activeClue)), () => openBuzzersAfterReadingRef.current(clue.id));
     } else if (phase === 'ANSWERING' && activeClue.isBonusWager) {
       if (activeClue.bonusWagerLocked) speak([{text: 'Here is your Daily Double.', hype: true}, clue.clue]);
     } else if (phase === 'ANSWERING') {
@@ -1692,6 +1756,14 @@ export function useGameController() {
     // Only when the clue moves to a new phase.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speaksHere, activeClue?.clue.id, activeClue?.phase, activeClue?.bonusWagerLocked]);
+
+  // The newest hint is read out as it appears.
+  useEffect(() => {
+    if (!speaksHere || !activeClue || activeClue.phase !== 'BUZZER_OPEN' || !hintCount(activeClue)) return;
+    const shown = activeClue.hintsShown ?? 1;
+    if (shown > 1) speak(activeClue.clue.hints![shown - 1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [speaksHere, activeClue?.clue.id, activeClue?.hintsShown]);
 
   // Read each column out as the category reveal shows it.
   useEffect(() => {
@@ -2215,6 +2287,9 @@ export function useGameController() {
     setAnswerMode,
     gameLength,
     setGameLength,
+    episodeCode,
+    setEpisodeCode,
+    makeEpisodeCode,
     isTwoPlayerMode,
     setIsTwoPlayerMode,
     gameState,

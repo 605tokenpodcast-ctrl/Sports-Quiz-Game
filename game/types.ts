@@ -79,6 +79,10 @@ export interface ActiveClueState extends Countdown {
   selectedOption: string | null;
   typedInput: string;
   feedbackText: string;
+  /** A Who Am I? clue: how many of its hints are showing (1 at first). */
+  hintsShown?: number;
+  /** What the clue is worth to the player who buzzed in, fixed when they buzzed (it drops as hints appear). */
+  stakeAtBuzz?: number;
 }
 
 export type FinalPhase = 'WAGER' | 'CLUE' | 'RESULTS';

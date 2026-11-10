@@ -26,6 +26,11 @@ import {
   updateStreaks,
   isOnFire,
   remoteBuzzTime,
+  HINT_SECONDS,
+  hintValue,
+  shownClueText,
+  currentWorth,
+  clueStake,
 } from '../game/rules';
 import {streakLine} from '../utils/speech';
 import {recapAwards} from '../game/recap';
@@ -244,6 +249,33 @@ check("a phone's buzz is timed from when it showed the light, so the host player
   assert.equal(remoteBuzzTime(1000, 1360, 80), 1280);
   // A reaction time can never place the buzz after it arrived.
   assert.equal(remoteBuzzTime(1000, 1100, 50, 900), 1100);
+});
+
+check('Who Am I? shows one hint at a time and the tile is worth less with each one', () => {
+  const who = {
+    id: 'w1', category: 'WHO AM I?', value: 1200, clue: 'A, B and C.', correctAnswer: 'Tom Brady', aliases: [], distractors: ['A', 'B', 'C'],
+    sport: 'NFL' as const, difficulty: 3, hints: ['Hint one.', 'Hint two.', 'Hint three.'],
+  };
+  const reading = clue({clue: who, phase: 'READING', buzzedContestantId: null});
+  assert.equal(shownClueText(reading), 'Hint one.');
+  assert.equal(currentWorth(reading), 1200);
+  // The buzzers stay open long enough for every hint.
+  const opened = clueTimeUp(reading, 10, now);
+  assert.equal(opened.kind, 'buzzers-open');
+  if (opened.kind === 'buzzers-open') assert.equal(msLeft(opened.next, now), (10 + 2 * HINT_SECONDS) * 1000);
+  const second = {...reading, phase: 'BUZZER_OPEN' as const, hintsShown: 2};
+  assert.equal(shownClueText(second), 'Hint one. Hint two.');
+  assert.equal(currentWorth(second), 800);
+  assert.equal(hintValue(1200, 3, 3), 400);
+  // Buzzing in locks the value; a miss shows every hint and the next player plays for the lowest value.
+  const answering = {...second, phase: 'ANSWERING' as const, buzzedContestantId: 'player' as const, stakeAtBuzz: 800};
+  assert.equal(clueStake(answering), 800);
+  const missed = resolveAnswer(answering, 'player', false, {kind: 'player', answer: 'X'}, ctx);
+  assert.equal(missed.hintsShown, 3);
+  assert.equal(currentWorth(missed), 400);
+  // The answer shows the whole clue, and a Daily Double never uses hints.
+  assert.equal(shownClueText({...missed, phase: 'REVEALED'}), 'A, B and C.');
+  assert.equal(shownClueText(clue({clue: who, isBonusWager: true, phase: 'ANSWERING'})), 'A, B and C.');
 });
 
 if (failed) process.exit(1);

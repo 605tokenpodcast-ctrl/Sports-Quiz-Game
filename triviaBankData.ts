@@ -11,6 +11,7 @@ export interface CategoryEntry {
   distractors: string[];
   aliases?: string[];
   difficulty: number;
+  hints?: string[];
 }
 
 export interface CategorySpecData {

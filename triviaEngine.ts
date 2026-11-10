@@ -29,6 +29,8 @@ export interface QuestionClue {
    * give away another's answer.
    */
   subjects?: string[];
+  /** Who Am I?: the clue as hints, hardest first, shown one at a time as the tile's value drops. */
+  hints?: string[];
 }
 
 export interface TriviaCategory {
@@ -65,14 +67,12 @@ export function sanitizeAnswerChoice(str: string): string {
 }
 
 /**
- * Strips all unnecessary parenthetical expressions, metadata markers, series counters,
- * and contextual annotations from question prompts, guaranteeing clean, concise,
- * natural trivia prompts without visual clutter.
+ * Tidies a clue's spacing and punctuation. Parentheses stay: the question builder writes hints
+ * in them on purpose ("a first-round pick (11th overall)").
  */
 export function sanitizeQuestionClue(str: string): string {
   if (!str) return '';
   return str
-    .replace(/\s*\([^)]*\)/g, '') // remove any parenthetical notes
     .replace(/\s+,/g, ',') // clean up space before comma
     .replace(/\s+\./g, '.') // clean up space before period
     .replace(/\s+\?/g, '?') // clean up space before question mark
@@ -81,8 +81,13 @@ export function sanitizeQuestionClue(str: string): string {
     .trim();
 }
 
-/** The last word of an answer ("Mahomes"), skipping endings like "Jr." or "St." that would match anything. */
+/**
+ * The last word of a person's name ("Mahomes"), skipping endings like "Jr." that would match anything.
+ * Only for people: the last word of a school or stadium ("Florida" in Central Florida, "Stadium")
+ * names something else.
+ */
 function lastNameAlias(answer: string): string {
+  if (answerKind(answer) !== 'person') return '';
   const words = answer.toLowerCase().trim().split(/\s+/);
   const last = words[words.length - 1] || '';
   if (words.length < 2 || /^(jr|sr|ii|iii|iv|v|st)\.?$/.test(last) || /^\d+$/.test(last)) return '';
@@ -159,6 +164,7 @@ const TEAM_NICKNAMES = [
   'Rams', 'Dolphins', 'Vikings', 'Patriots', 'Saints', 'Giants', 'Jets', 'Eagles', 'Steelers',
   '49ers', 'Seahawks', 'Buccaneers', 'Titans', 'Commanders', 'Redskins', 'Oilers', 'Football Team',
 ];
+export const TEAM_NICKNAMES_FOR_TESTS: readonly string[] = TEAM_NICKNAMES;
 const PLACE_WORDS = /\b(stadium|field|park|dome|bowl|coliseum|center|centre|arena|superdome|college|university|state|tech|a&m|round|pick|overall|yards?|points?|wins?|losses?|games?)\b/i;
 
 /**
@@ -240,13 +246,29 @@ export function generateSmartDistractors(
   correctAnswer: string,
   sport: SportTag,
   category: string,
-  existingDistractors: string[] = []
+  existingDistractors: string[] = [],
+  clueText = ''
 ): string[] {
   const cleanCorrect = sanitizeAnswerChoice(correctAnswer);
   const target = normalizeAnswer(cleanCorrect);
   const kind = answerKind(cleanCorrect);
   const curated: string[] = [];
   const taken = new Set<string>([target]);
+  // Anything the clue names is a free elimination ("beat the Tennessee Titans" offering the Titans).
+  const shown = ` ${clueText.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
+  const namedInClue = (d: string) => {
+    const words = d.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (words.length > 3 && shown.includes(` ${words} `)) return true;
+    // A team the clue calls by its nickname ("beating the Eagles").
+    const nick = TEAM_NICKNAMES.find((n) => d.endsWith(` ${n}`));
+    return Boolean(nick && shown.includes(` ${nick.toLowerCase()} `));
+  };
+  // A draft steal "lasted until" a later round, so Round 1 can't be the answer.
+  const impossible = (d: string) => /lasted until this round/i.test(clueText) && /^Round 1$/.test(d);
+  for (const d of existingDistractors) {
+    const cleanD = sanitizeAnswerChoice(d);
+    if (cleanD && (namedInClue(cleanD) || impossible(cleanD))) taken.add(normalizeAnswer(cleanD));
+  }
 
   existingDistractors.forEach((d) => {
     const cleanD = sanitizeAnswerChoice(d);
@@ -281,7 +303,7 @@ export function generateSmartDistractors(
   for (const peer of fisherYatesShuffle(pool)) {
     if (out.length >= 7) break;
     const norm = normalizeAnswer(peer);
-    if (taken.has(norm)) continue;
+    if (taken.has(norm) || namedInClue(peer)) continue;
     taken.add(norm);
     out.push(peer);
   }
@@ -304,8 +326,15 @@ export interface CategorySpec {
     distractors: string[];
     aliases?: string[];
     difficulty: number;
+    hints?: string[];
   }[];
 }
+
+import { collegeName, collegeAliases } from './colleges';
+import { flaggedIds } from './utils/badQuestions';
+
+/** Questions the host flagged as bad, left out of games on this device (not for episode codes, which must match everywhere). */
+const flaggedHere = (): Set<string> => (gameRandomSource || typeof localStorage === 'undefined' ? new Set() : flaggedIds());
 
 // Import builder helper that creates deep 100+ cohorts per category
 import { BUILT_IN_NFL_SPECS } from './triviaBankData';
@@ -366,14 +395,17 @@ export function getAllCompiledCategories(): TriviaCategory[] {
   for (const spec of [...BUILT_IN_NFL_SPECS, ...EXTERNAL_SPECS]) {
     const clues: QuestionClue[] = [];
 
+    // College answers are shown the way a host says them ("Boston College", "Miami of Ohio"),
+    // even in a bank built before the builder did that itself.
+    const isCollege = spec.id.startsWith('nfl_colleges_');
     spec.entries.forEach((raw, idx) => {
-      const cleanAnswer = sanitizeAnswerChoice(raw.answer);
+      const cleanAnswer = sanitizeAnswerChoice(isCollege ? collegeName(raw.answer) : raw.answer);
       const ansNorm = normalizeAnswer(cleanAnswer);
       if (!ansNorm) return;
 
       const signature = `${spec.id}__${idx}__${cleanAnswer}__${raw.difficulty}`;
       const id = raw.id || `q_${createDeterministicHash(signature)}`;
-      const distractors = generateSmartDistractors(cleanAnswer, spec.sport, spec.title, raw.distractors);
+      const distractors = generateSmartDistractors(cleanAnswer, spec.sport, spec.title, isCollege ? raw.distractors.map(collegeName) : raw.distractors, raw.clue);
 
       clues.push({
         id,
@@ -383,15 +415,10 @@ export function getAllCompiledCategories(): TriviaCategory[] {
         clue: sanitizeQuestionClue(raw.clue),
         correctAnswer: cleanAnswer,
         distractors,
-        aliases: Array.from(
-          new Set([
-            cleanAnswer.toLowerCase().trim(),
-            lastNameAlias(cleanAnswer),
-            ...(raw.aliases || []).map((a) => sanitizeAnswerChoice(a).toLowerCase().trim()),
-          ])
-        ).filter(Boolean),
+        aliases: answerAliases(cleanAnswer, raw.aliases || [], isCollege),
         sport: spec.sport,
         difficulty: raw.difficulty,
+        ...(raw.hints && raw.hints.length > 1 ? {hints: raw.hints.map(sanitizeQuestionClue)} : {}),
       });
 
     });
@@ -408,6 +435,30 @@ export function getAllCompiledCategories(): TriviaCategory[] {
   tagSubjects(result);
   COMPILED_CACHE = result;
   return result;
+}
+
+// Cities with more than one team: "New York" alone doesn't say Giants or Jets.
+const SHARED_TEAM_CITIES = new Set(['new york', 'los angeles', 'ny', 'la', 'l.a.']);
+
+/** Every answer the checker accepts for a clue, in lower case. */
+export function answerAliases(answer: string, extra: string[], isCollege = false): string[] {
+  const kind = answerKind(answer);
+  const all = [
+    answer.toLowerCase().trim(),
+    // A school can look like a name ("Central Florida"), but its last word is another school.
+    isCollege ? '' : lastNameAlias(answer),
+    ...extra.map((a) => sanitizeAnswerChoice(isCollege ? collegeName(a) : a).toLowerCase().trim()),
+    // The raw spelling too ("boston col."), so old answers still count.
+    ...(isCollege ? extra.map((a) => sanitizeAnswerChoice(a).toLowerCase().trim()) : []),
+    ...(isCollege ? collegeAliases(answer) : []),
+    // "Acrisure" for Acrisure Stadium.
+    / Stadium$/.test(answer) ? answer.replace(/ Stadium$/, '').toLowerCase() : '',
+  ];
+  return Array.from(new Set(all)).filter((a) => {
+    if (!a) return false;
+    if (kind === 'team' && SHARED_TEAM_CITIES.has(a)) return false;
+    return true;
+  });
 }
 
 /** Fills in each clue's `subjects`: the people (from every person answer in the bank) it names. */
@@ -450,8 +501,8 @@ export function markClueUsed(q: QuestionClue, used: Set<string>): void {
 
 // Board columns that are too alike to share a board: at most one of each family per round.
 const CATEGORY_FAMILIES: [RegExp, string][] = [
-  [/^nfl_(drafted_by_|draft_steals$|mr_irrelevant$|number_one_picks$)/, 'draft'],
-  [/^nfl_colleges_/, 'college'],
+  // Draft and college columns share a family: at most one per board, so boards aren't mostly draft trivia.
+  [/^nfl_(drafted_by_|draft_steals$|mr_irrelevant$|number_one_picks$|colleges_)/, 'draft'],
   [/^nfl_(passing|rushing|receiving)_leaders$/, 'leaders'],
   [/^nfl_super_bowl/, 'super_bowl'],
 ];
@@ -464,6 +515,8 @@ export const STORY_CATEGORY_IDS = new Set([
   'nfl_conference_title',
   'nfl_records',
   'nfl_records_legends',
+  'nfl_playoff_heroes',
+  'nfl_monster_games',
 ]);
 
 export function getTotalCategoryCount(): number {
@@ -506,7 +559,28 @@ function hydrateSeenStore(): void {
 
 export function getSeenQuestionIds(): Set<string> {
   hydrateSeenStore();
-  return SEEN_HASH_SET;
+  // An episode code deals the same boards everywhere, so what this device has seen can't matter.
+  return gameRandomSource ? NOTHING_SEEN : SEEN_HASH_SET;
+}
+const NOTHING_SEEN = new Set<string>();
+
+// While an episode code deals a game, every random pick comes from it instead of Math.random.
+let gameRandomSource: (() => number) | null = null;
+
+/** A random number for dealing a game: from the episode code when there is one. */
+export const gameRandom = () => (gameRandomSource ? gameRandomSource() : Math.random());
+
+/** Runs `deal` with every random pick taken from `random` (an episode code's), or Math.random when null. */
+export function dealWith<T>(random: (() => number) | null, deal: () => T): T {
+  // Prepare the questions first: that shuffles wrong answers, which must not use up the code's numbers.
+  getAllCompiledCategories();
+  const before = gameRandomSource;
+  gameRandomSource = random;
+  try {
+    return deal();
+  } finally {
+    gameRandomSource = before;
+  }
 }
 
 export function markQuestionSeen(id: string): void {
@@ -549,7 +623,7 @@ export function getSeenQuestionsCount(): number {
 export function fisherYatesShuffle<T>(items: T[]): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(gameRandom() * (i + 1));
     [result[i], result[j]] = [result[j], result[i]];
   }
   return result;
@@ -634,6 +708,7 @@ export function generateBoardForRound(
 
   const selectedBoard: TriviaCategory[] = [];
   const familiesOnBoard = new Set<string>();
+  const flagged = flaggedHere();
 
   for (const cat of order) {
     if (selectedBoard.length >= categoryCount) break;
@@ -642,7 +717,7 @@ export function generateBoardForRound(
 
     // Clues not served yet whose answer and people are new this game, shuffled,
     // with questions this device has never seen first.
-    const eligibleShuffled = fisherYatesShuffle(cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers)));
+    const eligibleShuffled = fisherYatesShuffle(cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers) && !flagged.has(q.id)));
     const eligibleClues = [...eligibleShuffled.filter((q) => !seen.has(q.id)), ...eligibleShuffled.filter((q) => seen.has(q.id))];
 
     // Build the ladder (difficulty 1 to 5, or 1/3/5 for a short game).
@@ -697,14 +772,18 @@ export const FINAL_CATEGORY_IDS = new Set([
   'nfl_receiving_leaders',
   'nfl_records_legends',
   'nfl_franchises_stadiums',
+  'nfl_playoff_heroes',
+  'nfl_monster_games',
 ]);
 
 export function getChampionshipFinalClues(): QuestionClue[] {
   const allCategories = getActiveCategories().filter((c) => FINAL_CATEGORY_IDS.has(c.id));
   const clues: QuestionClue[] = [];
+  const flagged = flaggedHere();
 
   allCategories.forEach((cat) => {
     cat.clues.forEach((q) => {
+      if (flagged.has(q.id)) return;
       // Stadium names make poor Finals: hard to spell and easy to half-know.
       // Numbers and scores ("13", "24-10") make poor Finals too: a near miss is still wrong.
       const kind = answerKind(q.correctAnswer);

@@ -3,7 +3,7 @@ import React from 'react';
 import {Trophy, Zap, Clock, Flame, Star, Smartphone, Wifi, Gamepad2, ArrowLeft, Lock, Share2} from 'lucide-react';
 import TimeLeft from '../utils/TimeLeft';
 import {ContestantId, isOpenAnswerMode, seatLabel} from '../game/types';
-import {maxDailyDoubleWager, maxFinalWager, EARLY_BUZZ_LOCKOUT_MS} from '../game/rules';
+import {maxDailyDoubleWager, maxFinalWager, EARLY_BUZZ_LOCKOUT_MS, shownClueText, currentWorth, hintCount} from '../game/rules';
 import VoiceAnswerButton, {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {FinalChoices} from '../ui/shared';
 import {useGame} from '../game/GameContext';
@@ -101,6 +101,26 @@ export default function PhoneScreen() {
           </div>
         </header>
 
+        {/* Lost the host mid-game: the phone reconnects by itself and the host keeps the seat and score. */}
+        {gameState.status !== 'START' && p2pStatus !== 'connected' && (
+          <div
+            role="status"
+            className={`relative z-20 mt-2 w-full rounded-xl border px-3 py-2 text-center text-xs font-bold ${
+              p2pStatus === 'connecting' ? 'bg-amber-950/95 border-amber-500 text-amber-200' : 'bg-rose-950/95 border-rose-500 text-rose-100'
+            }`}>
+            {p2pStatus === 'connecting' ? (
+              <span>Reconnecting to the host... Your seat and score are saved.</span>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                {p2pDetail || 'Lost connection to the host.'}
+                <button onClick={() => window.location.reload()} className="px-2 py-1 rounded bg-rose-600 text-white">
+                  Rejoin
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Client Main Body: Dynamic Gamepad Controls */}
         <main className="relative z-10 flex-1 my-3 short:my-1.5 flex flex-col justify-center items-center w-full max-w-lg mx-auto">
           {/* 1. If Match has not started or in Start Screen */}
@@ -132,7 +152,7 @@ export default function PhoneScreen() {
                 <div className="flex items-center justify-between border-b border-blue-800 pb-2 mb-2">
                   <span className="text-xs font-black text-amber-400 uppercase">{activeClue.clue.category}</span>
                   <span className="text-xs font-black text-amber-300 bg-blue-950 px-2 py-0.5 rounded border border-blue-700">
-                    ${activeClue.isBonusWager ? activeClue.bonusWagerInput : activeClue.clue.value}
+                    ${currentWorth(activeClue)}
                     {activeClue.isBonusWager && <span className="ml-1 text-amber-400">DAILY DOUBLE</span>}
                   </span>
                 </div>
@@ -150,7 +170,12 @@ export default function PhoneScreen() {
                   </div>
                 ) : (
                   <p className="text-sm sm:text-base font-semibold text-slate-100 leading-snug mb-2">
-                    {activeClue.clue.clue}
+                    {hintCount(activeClue) > 0 && activeClue.phase !== 'REVEALED' && (
+                      <span className="block text-[10px] font-black text-amber-400 uppercase mb-1">
+                        Hint {activeClue.hintsShown ?? 1} of {hintCount(activeClue)}
+                      </span>
+                    )}
+                    {shownClueText(activeClue)}
                   </p>
                 )}
 
@@ -165,7 +190,7 @@ export default function PhoneScreen() {
                 <button
                   onClick={() => {
                     if (tooEarly) return;
-                    sendClientBuzz();
+                    sendClientBuzz(true);
                     setTooEarly(true);
                     window.setTimeout(() => setTooEarly(false), EARLY_BUZZ_LOCKOUT_MS + 150);
                   }}

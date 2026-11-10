@@ -216,8 +216,36 @@ export function updateStreaks<T extends Record<string, Contestant>>(all: T, who:
   return next;
 }
 
+// --- Who Am I? hints --------------------------------------------------------------------
+
+/** A new hint shows this often while the buzzers are open. */
+export const HINT_SECONDS = 4;
+
+/** How many hints a clue shows one at a time (0 when it shows the whole clue at once, as a Daily Double does). */
+export const hintCount = (c: Pick<ActiveClueState, 'clue' | 'isBonusWager'>) =>
+  !c.isBonusWager && c.clue.hints && c.clue.hints.length > 1 ? c.clue.hints.length : 0;
+
+/** A tile's value with `shown` of `total` hints up: full with one hint, then down by equal steps (rounded to $100). */
+export const hintValue = (value: number, shown: number, total: number) =>
+  total ? Math.max(100, Math.round((value * (total - Math.min(shown, total) + 1)) / total / 100) * 100) : value;
+
+/** The clue text players can see right now: the hints so far, or the whole clue. */
+export function shownClueText(c: Pick<ActiveClueState, 'clue' | 'isBonusWager' | 'phase' | 'hintsShown'>): string {
+  const n = hintCount(c);
+  if (!n || c.phase === 'REVEALED') return c.clue.clue;
+  return c.clue.hints!.slice(0, Math.max(1, c.hintsShown ?? 1)).join(' ');
+}
+
+/** What the clue is worth right now: the wager, the value when the current player buzzed, or the value at this hint. */
+export function currentWorth(c: ActiveClueState): number {
+  if (c.isBonusWager) return c.bonusWagerInput;
+  if (c.stakeAtBuzz !== undefined) return c.stakeAtBuzz;
+  const n = hintCount(c);
+  return n ? hintValue(c.clue.value, c.hintsShown ?? 1, n) : c.clue.value;
+}
+
 /** What a clue is worth to the player answering it. */
-export const clueStake = (clue: ActiveClueState) => (clue.isBonusWager ? clue.bonusWagerInput : clue.clue.value);
+export const clueStake = (clue: ActiveClueState) => currentWorth(clue);
 
 export type AnswerHow =
   | {kind: 'player'; answer: string; byVoice?: boolean} // a person picked, typed or said an answer
@@ -271,12 +299,15 @@ export function resolveAnswer(
   }
 
   const reopenFor = how.kind === 'timeout' ? TIMES.reopenAfterTimeout : TIMES.reopenAfterWrong;
+  const hints = hintCount(prev);
   return {
     ...prev,
     ...startCountdown(reopenFor, ctx.now),
     phase: 'BUZZER_OPEN',
     buzzedContestantId: null,
     buzzerLockout,
+    // After a miss everyone sees every hint, and the clue is worth its lowest value.
+    ...(hints ? {hintsShown: hints, stakeAtBuzz: undefined} : {}),
     feedbackText:
       how.kind === 'ai'
         ? `${ctx.name} said "${how.answer}" (Incorrect, -$${stake}). Buzzers re-opened!`
@@ -300,7 +331,8 @@ export function clueTimeUp(prev: ActiveClueState, questionTimeLimit: number, now
         kind: 'buzzers-open',
         next: {
           ...prev,
-          ...startCountdown(questionTimeLimit, now),
+          // A Who Am I? clue keeps the buzzers open long enough for every hint to show.
+          ...startCountdown(questionTimeLimit + Math.max(0, hintCount(prev) - 1) * HINT_SECONDS, now),
           phase: 'BUZZER_OPEN',
           feedbackText: 'BUZZERS ACTIVE! Buzz in now!',
         },

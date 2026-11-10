@@ -23,6 +23,7 @@ export default function ResultsOverlay() {
     recapAwardsList,
     shareRecap,
     seasonRows,
+    episodeCode,
   } = useGame();
   return (
     <>
@@ -162,6 +163,14 @@ export default function ResultsOverlay() {
                 <Share2 className="w-4 h-4" />
                 <span>SHARE RECAP CARD</span>
               </button>
+
+              {episodeCode && (
+                <div className="w-full rounded-xl border border-amber-500/60 bg-slate-950/80 px-3 py-2 text-center">
+                  <div className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">Episode code</div>
+                  <div className="text-xl font-black text-white tracking-widest">{episodeCode}</div>
+                  <div className="text-[10px] text-slate-400">Anyone who enters it gets these same boards until Tuesday's question refresh.</div>
+                </div>
+              )}
 
               <button
                 onClick={() => openLeaderboardWithConfig(currentOpponentMode, difficulty as TriviaTier, answerMode as AnswerFormat)}

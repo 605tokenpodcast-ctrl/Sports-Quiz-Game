@@ -17,6 +17,7 @@ import {
   markClueUsed,
   getSeenQuestionsCount,
   getSeenQuestionIds,
+  gameRandom,
   markQuestionSeen,
   resetSeenQuestions,
   getTotalAvailableQuestionCount,
@@ -252,7 +253,7 @@ export function getFreshFinalShowdownClue(
   // while this device still has some it hasn't seen.
   const handWritten = candidates.filter((q) => q.id.startsWith('final_'));
   const pool =
-    handWritten.length > 0 && Math.random() < 0.35
+    handWritten.length > 0 && gameRandom() < 0.35
       ? handWritten
       : candidates.length > 0
       ? candidates
@@ -260,7 +261,7 @@ export function getFreshFinalShowdownClue(
       ? fallbackCandidates
       : finalPool;
 
-  const picked = pool[Math.floor(Math.random() * pool.length)];
+  const picked = pool[Math.floor(gameRandom() * pool.length)];
 
   usedQuestionIds.add(picked.id);
   markClueUsed(picked, usedAnswers);
@@ -347,7 +348,8 @@ export function buildQuestionOptions(clue: QuestionClue, mode: 'STANDARD' | 'HAR
     clue.correctAnswer,
     clue.sport,
     clue.category,
-    clue.distractors
+    clue.distractors,
+    clue.clue
   );
 
   const cleanCorrect = sanitizeAnswerChoice(clue.correctAnswer);
@@ -398,8 +400,11 @@ export function checkTypedAnswer(input: string, clue: QuestionClue, threshold = 
     const aliasClean = clean(alias);
     if (!aliasClean) continue;
     if (userClean === aliasClean) return true;
-    // A partial answer, like "mahome" for "mahomes".
-    if (userClean.length >= 3 && aliasClean.includes(userClean) && userClean.length >= aliasClean.length * 0.7) return true;
+    // A partial answer, like "mahome" for "mahomes". Not whole words with one left off, though:
+    // "north carolina" is a different school from North Carolina State.
+    const aliasWords = aliasClean.split(' ');
+    const droppedWholeWord = userClean.split(' ').every((w) => aliasWords.includes(w)) && userClean.split(' ').length < aliasWords.length;
+    if (userClean.length >= 3 && aliasClean.includes(userClean) && userClean.length >= aliasClean.length * 0.7 && !droppedWholeWord) return true;
     // Extra words around an alias are fine ("kc chiefs"), but not a different first name
     // ("emmitt smith" when the answer is Malcolm Smith).
     if (userClean.includes(aliasClean) && userClean.length >= 3) {
