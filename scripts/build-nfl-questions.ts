@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collegeName } from '../colleges';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = join(ROOT, '.cache', 'nflverse');
@@ -185,9 +186,24 @@ function nameAliases(name: string): string[] {
   return [name, parts[parts.length - 1]];
 }
 
+// Cities with more than one team: "New York" alone doesn't say Giants or Jets.
+const SHARED_CITIES = new Set(['New York', 'Los Angeles']);
+
 function teamAliases(full: string): string[] {
-  return [full, nickname(full), full.replace(` ${nickname(full)}`, '')];
+  const city = full.replace(` ${nickname(full)}`, '');
+  return [full, nickname(full), ...(SHARED_CITIES.has(city) ? [] : [city])];
 }
+
+/** A wrong answer the clue already names is a free elimination ("beat the Titans" offering the Titans). */
+function namedInClue(clue: string, d: string): boolean {
+  const words = (x: string) => ` ${x.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const shown = words(clue);
+  if (d.length > 3 && shown.includes(words(d))) return true;
+  // A team the clue calls by its nickname ("beating the Eagles").
+  const nick = d.split(' ').slice(-1)[0];
+  return d.includes(' ') && TEAM_WORDS.has(nick) && shown.includes(words(nick));
+}
+const TEAM_WORDS = new Set(['Cardinals', 'Falcons', 'Ravens', 'Bills', 'Panthers', 'Bears', 'Bengals', 'Browns', 'Cowboys', 'Broncos', 'Lions', 'Packers', 'Texans', 'Colts', 'Jaguars', 'Chiefs', 'Raiders', 'Chargers', 'Rams', 'Dolphins', 'Vikings', 'Patriots', 'Saints', 'Giants', 'Jets', 'Eagles', 'Steelers', '49ers', 'Seahawks', 'Buccaneers', 'Titans', 'Commanders', 'Redskins', 'Oilers']);
 
 function add(
   cat: Category,
@@ -198,6 +214,8 @@ function add(
   difficulty: number,
   aliases: string[] = [answer]
 ) {
+  // Nothing the clue names, and no Round 1 for a player who "lasted until" a later round.
+  distractors = distractors.filter((d) => !namedInClue(clue, d) && !(/lasted until this round/.test(clue) && d === 'Round 1'));
   if (distractors.length < 3) return; // not enough plausible wrong answers to ask it fairly
   cat.entries.push({
     id: hashId(key),
@@ -207,6 +225,11 @@ function add(
     aliases: [...new Set(aliases.map((a) => a.toLowerCase()))],
     difficulty: clamp(difficulty),
   });
+}
+
+/** "the Georgia Dome", "the Rose Bowl", but "Raymond James Stadium". */
+function theStadium(name: string): string {
+  return /(Dome|Superdome|Metrodome|Bowl|Coliseum)$/.test(name) && !/^The /.test(name) ? `the ${name}` : name;
 }
 
 function roman(n: number): string {
@@ -304,6 +327,9 @@ async function main() {
   ]);
 
   fixNames(games);
+  // Schools the way a host says them: "Boston College", "Ohio State", "Miami of Ohio".
+  for (const d of draft) d.college = collegeName(d.college);
+  for (const c of combine) c.school = collegeName(c.school);
   const played = games.filter((g) => g.home_score !== '' && g.away_score !== '');
   const currentSeason = Math.max(...games.map((g) => num(g.season)));
   const lastComplete = Math.max(...played.filter((g) => g.game_type === 'SB').map((g) => num(g.season)));
@@ -361,10 +387,10 @@ async function main() {
     const playoffTeams = [...new Set(played.filter((x) => num(x.season) === season && x.game_type !== 'REG').flatMap((x) => [name(x, 'home'), name(x, 'away')]))];
     const allTeams = teamsInSeason(season, games);
     const key = `sb_${season}`;
-    const at = g.stadium ? ` at ${g.stadium}` : '';
+    const at = g.stadium ? ` at ${theStadium(g.stadium)}` : '';
 
     add(sbCat, `${key}_winner`, `This team capped the ${season} season by beating the ${loser} ${ws}-${ls} in ${sb}${at}.`, winner,
-      pickDistractors(winner, [loser], playoffTeams.concat(allTeams), key + 'w'), ageDifficulty(season, lastComplete, 1), teamAliases(winner));
+      pickDistractors(winner, [], playoffTeams.concat(allTeams).filter((t) => t !== loser), key + 'w'), ageDifficulty(season, lastComplete, 1), teamAliases(winner));
     add(sbCoachCat, `${key}_loser`, `The ${winner} beat this team ${ws}-${ls} in ${sb}.`, loser,
       pickDistractors(loser, [], playoffTeams.concat(allTeams), key + 'l'), ageDifficulty(season, lastComplete, 2), teamAliases(loser));
 
@@ -372,7 +398,7 @@ async function main() {
     const winQb = g[`${w}_qb_name`], loseQb = g[`${l}_qb_name`];
     if (winQb) add(sbCat, `${key}_qb`,
       `He quarterbacked the ${season} ${nickname(winner)} to a ${ws}-${ls} win over the ${nickname(loser)}${loseQb ? ` and ${loseQb}` : ''} in ${sb}.`, winQb,
-      pickDistractors(winQb, [loseQb], qbs, key + 'q'), ageDifficulty(season, lastComplete, 2), nameAliases(winQb));
+      pickDistractors(winQb, [], qbs.filter((q) => q !== loseQb), key + 'q'), ageDifficulty(season, lastComplete, 2), nameAliases(winQb));
 
     const coaches = [...new Set(played.filter((x) => num(x.season) === season).flatMap((x) => [x.home_coach, x.away_coach]).filter(Boolean))];
     const winCoach = g[`${w}_coach`];
@@ -405,7 +431,7 @@ async function main() {
     const key = `con_${season}_${conf}`;
     const winQb = g[`${w}_qb_name`];
     add(conCat, `${key}_w`, `${winQb ? `With ${winQb} at quarterback, this` : 'This'} team won the ${conf} title after the ${season} season, beating the ${nickname(loser)} ${hi}-${lo}.`, winner,
-      pickDistractors(winner, [loser], confTeams, key + 'w'), ageDifficulty(season, currentSeason, 2), teamAliases(winner));
+      pickDistractors(winner, [], confTeams.filter((t) => t !== loser), key + 'w'), ageDifficulty(season, currentSeason, 2), teamAliases(winner));
     add(conCat, `${key}_l`, `The ${winner} punched their Super Bowl ticket after the ${season} season with a ${hi}-${lo} ${conf} Championship win over this team.`, loser,
       pickDistractors(loser, [], confTeams.filter((t) => t !== winner), key + 'l'), ageDifficulty(season, currentSeason, 3), teamAliases(loser));
   }
@@ -447,7 +473,7 @@ async function main() {
         ? `${leadIn(s, byPct[0].code)}this team has the NFL's best record through Week ${latestFullWeek} of ${s}, at ${recordText(byPct[0])}.`
         : `${leadIn(s, byPct[0].code)}this team went ${recordText(byPct[0])} for the NFL's best record in ${s}.`;
       add(cat, `best_${s}${keySuffix}`, clue.charAt(0).toUpperCase() + clue.slice(1), best,
-        pickDistractors(best, byPct.slice(1, 8).map((r) => teamName(r.code, s)), [], `best${s}`), live ? 2 : ageDifficulty(s, currentSeason, 2), teamAliases(best));
+        pickDistractors(best, byPct.slice(1, 8).map((r) => teamName(r.code, s)), [], `best${s}`), live ? 1 : ageDifficulty(s, currentSeason, 2), teamAliases(best));
     }
     const worst = byPct[byPct.length - 1];
     if (worst.pct < byPct[byPct.length - 2].pct) {
@@ -517,7 +543,7 @@ async function main() {
       if (live) {
         add(category('this_season', `${s} Season So Far`, ''), `lead_${s}_${d.col}_wk${latestFullWeek}`,
           `Through Week ${latestFullWeek} of ${s}, this ${whoTag(top[0], s)} leads the NFL with ${fmt(value)} ${d.label}.`, leader,
-          pickDistractors(leader, others, [], `l${s}${d.col}`), 2, nameAliases(leader));
+          pickDistractors(leader, others, [], `l${s}${d.col}`), d.base, nameAliases(leader));
       } else {
         add(category(d.cat, d.title, `Single-season NFL leaders in ${d.label} and more, 1999 to now.`),
           `lead_${s}_${d.col}`, `This ${whoTag(top[0], s)} led the NFL with ${fmt(value)} ${d.label} in ${s}.`, leader,
@@ -705,7 +731,9 @@ async function main() {
               pool.filter((r) => posGroup(r.position) === posGroup(p.position)).slice(0, 24).map((r) => r.player_display_name),
               `tl${code}${d.col}`
             ),
-            2, nameAliases(p.player_display_name));
+            // A team's leader who is also near the top of the league is easier to name.
+            (() => { const r = pool.indexOf(p); return r >= 0 && r < 6 ? 1 : r >= 0 && r < 16 ? 2 : r >= 0 && r < 28 ? 3 : 4; })(),
+            nameAliases(p.player_display_name));
         }
       }
     }
@@ -717,14 +745,18 @@ async function main() {
     const coachOf = new Map<string, string>();
     for (const [code, g] of latestByTeam) coachOf.set(code, g.home_team === code ? g.home_coach : g.away_coach);
     const coachCat = category('head_coaches', 'Sideline Bosses', 'Who is running each sideline this season.');
+    // A coach with many seasons on a sideline is easier than a first-year coach.
+    const coachSeasons = (coach: string) => new Set(regGames.filter((g) => g.home_coach === coach || g.away_coach === coach).map((g) => g.season)).size;
     for (const [code, coach] of coachOf) {
       if (!coach) continue;
+      const seasons = coachSeasons(coach);
+      const coachDiff = seasons >= 10 ? 1 : seasons >= 5 ? 2 : seasons >= 2 ? 3 : 4;
       const team = teamName(code, cs);
       const rec = records.get(`${cs}|${code}`);
       add(coachCat, `coach_${cs}_${code}_${coach}`, `He's the head coach of the ${team}${rec ? `, ${recordText(rec)} so far this season` : ' this season'}.`, coach,
-        pickDistractors(coach, [], [...coachOf.values()], `coach${code}`), 2, nameAliases(coach));
+        pickDistractors(coach, [], [...coachOf.values()], `coach${code}`), coachDiff + 1, nameAliases(coach));
       add(coachCat, `coachteam_${cs}_${code}_${coach}`, `${coach} runs the sideline for this team in ${cs}.`, team,
-        pickDistractors(team, [], allTeamsNow, `coacht${code}`), 2, teamAliases(team));
+        pickDistractors(team, [], allTeamsNow, `coacht${code}`), coachDiff, teamAliases(team));
     }
 
     // Grouped by stadium id, because one building shows up under old and new names. The
@@ -758,19 +790,20 @@ async function main() {
 
     // Star players this season: which team they play for.
     const seasonRows = statsBySeason.get(cs) ?? [];
-    const stars = [...seasonRows].sort((a, b) => num(b.fantasy_points_ppr) - num(a.fantasy_points_ppr)).slice(0, 80);
+    const stars = [...seasonRows].sort((a, b) => num(b.fantasy_points_ppr) - num(a.fantasy_points_ppr)).slice(0, 100);
     const latestWeek = Math.max(0, ...rosters.map((r) => num(r.week)).filter((n) => !isNaN(n)));
     const rosterNow = new Map(rosters.filter((r) => num(r.week) === latestWeek).map((r) => [r.gsis_id, r]));
     const playersCat = category('stars_now', 'Stars of Today', 'Which team the league\'s top players suit up for this season.');
-    for (const p of stars) {
+    for (const [rank, p] of stars.entries()) {
       const r = rosterNow.get(p.player_id);
       if (!r || !r.team) continue;
       const team = teamName(r.team, cs);
       // Transfers are listed newest first ("LSU; Ohio State" for Joe Burrow): name that school only.
-      const school = (r.college || '').split(';').map((c) => c.trim()).filter((c) => c && c !== 'NA')[0];
+      const school = collegeName((r.college || '').split(';').map((c) => c.trim()).filter((c) => c && c !== 'NA')[0] ?? '');
       const college = school ? `, who played college ball at ${school},` : '';
       add(playersCat, `team_${cs}_${p.player_id}_${r.team}`, `${posWord(r.position).replace(/^./, (c) => c.toUpperCase())} ${p.player_display_name}${college} suits up for this team in ${cs}.`, team,
-        pickDistractors(team, [], allTeamsNow, `pt${p.player_id}`), 1, teamAliases(team));
+        // The league's biggest names are the cheap tiles; deeper down the list costs more.
+        pickDistractors(team, [], allTeamsNow, `pt${p.player_id}`), rank < 20 ? 1 : rank < 45 ? 2 : rank < 70 ? 3 : 4, teamAliases(team));
     }
   }
 
@@ -879,7 +912,7 @@ async function main() {
     }
     if (d.college) {
       const career = starred || nickname(team);
-      const accolade = num(d.probowls) >= 2 ? `${num(d.probowls)} Pro Bowls` : d.hof === 'TRUE' ? 'a Hall of Fame career' : 'a Pro Bowl career';
+      const accolade = num(d.probowls) >= 2 ? `${num(d.probowls)} Pro Bowls` : d.hof === 'TRUE' ? 'a Hall of Fame career' : num(d.probowls) === 1 ? 'a Pro Bowl nod' : 'a standout career';
       add(category(`colleges_${y >= 2005 ? 'modern' : 'classic'}`, y >= 2005 ? 'Before They Were Pros' : 'Before They Were Pros: Classics', 'Where NFL stars played their college football.'),
         `college_${pid}`, `Before ${accolade} with the ${career}, ${pos} ${player} played his college ball here.`, d.college,
         pickDistractors(d.college, [], allColleges, `col${player}`), 3 + fame, [d.college]);
@@ -894,7 +927,9 @@ async function main() {
     const p = runs[0];
     let drafted = '';
     try { drafted = p.draft_team && p.draft_team !== 'NA' ? `, later drafted by the ${nickname(teamName(p.draft_team, y))},` : ''; } catch { drafted = ''; }
-    add(combineCat, `forty_${y}`, `This ${p.school ? `${p.school} ` : ''}${posWord(p.pos)}${drafted} ran the fastest 40 at the ${y} Combine: ${p.forty} seconds.`, p.player_name,
+    // COVID canceled the 2021 Combine, so that year's times are from pro days.
+    const where = y === 2021 ? `of any 2021 draft prospect (the Combine was canceled that year)` : `at the ${y} Combine`;
+    add(combineCat, `forty_${y}`, `This ${p.school ? `${p.school} ` : ''}${posWord(p.pos)}${drafted} ran the fastest 40 ${where}: ${num(p.forty).toFixed(2)} seconds.`, p.player_name,
       pickDistractors(p.player_name, runs.slice(1, 8).map((r) => r.player_name), [], `f${y}`), ageDifficulty(y, latestDraft, 3), nameAliases(p.player_name));
   }
 
