@@ -347,7 +347,8 @@ export function buildQuestionOptions(clue: QuestionClue, mode: 'STANDARD' | 'HAR
     clue.correctAnswer,
     clue.sport,
     clue.category,
-    clue.distractors
+    clue.distractors,
+    clue.clue
   );
 
   const cleanCorrect = sanitizeAnswerChoice(clue.correctAnswer);

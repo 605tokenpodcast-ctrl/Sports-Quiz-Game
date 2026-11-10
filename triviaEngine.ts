@@ -162,6 +162,7 @@ const TEAM_NICKNAMES = [
   'Rams', 'Dolphins', 'Vikings', 'Patriots', 'Saints', 'Giants', 'Jets', 'Eagles', 'Steelers',
   '49ers', 'Seahawks', 'Buccaneers', 'Titans', 'Commanders', 'Redskins', 'Oilers', 'Football Team',
 ];
+export const TEAM_NICKNAMES_FOR_TESTS: readonly string[] = TEAM_NICKNAMES;
 const PLACE_WORDS = /\b(stadium|field|park|dome|bowl|coliseum|center|centre|arena|superdome|college|university|state|tech|a&m|round|pick|overall|yards?|points?|wins?|losses?|games?)\b/i;
 
 /**
@@ -243,13 +244,29 @@ export function generateSmartDistractors(
   correctAnswer: string,
   sport: SportTag,
   category: string,
-  existingDistractors: string[] = []
+  existingDistractors: string[] = [],
+  clueText = ''
 ): string[] {
   const cleanCorrect = sanitizeAnswerChoice(correctAnswer);
   const target = normalizeAnswer(cleanCorrect);
   const kind = answerKind(cleanCorrect);
   const curated: string[] = [];
   const taken = new Set<string>([target]);
+  // Anything the clue names is a free elimination ("beat the Tennessee Titans" offering the Titans).
+  const shown = ` ${clueText.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
+  const namedInClue = (d: string) => {
+    const words = d.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (words.length > 3 && shown.includes(` ${words} `)) return true;
+    // A team the clue calls by its nickname ("beating the Eagles").
+    const nick = TEAM_NICKNAMES.find((n) => d.endsWith(` ${n}`));
+    return Boolean(nick && shown.includes(` ${nick.toLowerCase()} `));
+  };
+  // A draft steal "lasted until" a later round, so Round 1 can't be the answer.
+  const impossible = (d: string) => /lasted until this round/i.test(clueText) && /^Round 1$/.test(d);
+  for (const d of existingDistractors) {
+    const cleanD = sanitizeAnswerChoice(d);
+    if (cleanD && (namedInClue(cleanD) || impossible(cleanD))) taken.add(normalizeAnswer(cleanD));
+  }
 
   existingDistractors.forEach((d) => {
     const cleanD = sanitizeAnswerChoice(d);
@@ -284,7 +301,7 @@ export function generateSmartDistractors(
   for (const peer of fisherYatesShuffle(pool)) {
     if (out.length >= 7) break;
     const norm = normalizeAnswer(peer);
-    if (taken.has(norm)) continue;
+    if (taken.has(norm) || namedInClue(peer)) continue;
     taken.add(norm);
     out.push(peer);
   }
@@ -381,7 +398,7 @@ export function getAllCompiledCategories(): TriviaCategory[] {
 
       const signature = `${spec.id}__${idx}__${cleanAnswer}__${raw.difficulty}`;
       const id = raw.id || `q_${createDeterministicHash(signature)}`;
-      const distractors = generateSmartDistractors(cleanAnswer, spec.sport, spec.title, isCollege ? raw.distractors.map(collegeName) : raw.distractors);
+      const distractors = generateSmartDistractors(cleanAnswer, spec.sport, spec.title, isCollege ? raw.distractors.map(collegeName) : raw.distractors, raw.clue);
 
       clues.push({
         id,
