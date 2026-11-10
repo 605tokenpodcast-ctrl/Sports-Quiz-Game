@@ -19,6 +19,7 @@ import {
   QuestionClue,
   TriviaCategory,
 } from '../triviaData';
+import {useWakeLock} from '../utils/wakeLock';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
 import {
   answerLine,
@@ -287,6 +288,9 @@ export function useGameController() {
     loadBank();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceRole]);
+
+  // Keep screens on in a room: a phone that locks mid-game drops out, and a host that sleeps freezes everyone.
+  useWakeLock(deviceRole !== 'HOST' ? p2pStatus !== 'error' : gameState.status === 'PLAYING' || isClientConnected);
 
   // Anti-repeat question statistics
   const seenQuestionsCount = useMemo(() => {
@@ -919,7 +923,7 @@ export function useGameController() {
   // Phone: when this phone first showed the buzzer open for the current clue.
   const buzzerSeenRef = useRef<{clueId: string; at: number}>({clueId: '', at: 0});
   /** Phone: buzz in, with the reaction time since this phone showed the light (none if it hasn't yet). */
-  const sendClientBuzz = () => {
+  const sendClientBuzz = (early = false) => {
     const seen = buzzerSeenRef.current;
     const clueId = activeClueRef.current?.clue.id;
     p2pRef.current?.send({
@@ -928,6 +932,7 @@ export function useGameController() {
       timestamp: Date.now(),
       clueId,
       reactionMs: seen.clueId && seen.clueId === clueId ? Date.now() - seen.at : undefined,
+      early,
     });
   };
 
@@ -1062,7 +1067,8 @@ export function useGameController() {
             seats = {...seats};
             delete seats[stalePeer];
             remoteSeatsRef.current = seats;
-            const nextAway = {...awaySeatsRef.current, [staleSeat]: msg.playerName};
+            // Kept as away under its current name, so the phone gets its seat and name back below.
+            const nextAway = {...awaySeatsRef.current, [staleSeat]: contestantsRef.current[staleSeat].name};
             awaySeatsRef.current = nextAway;
             p2pRef.current?.disconnectPeer(stalePeer);
           }
@@ -1090,7 +1096,8 @@ export function useGameController() {
           setIsTwoPlayerMode(true);
           const label = seatLabel(seat);
           const rejoined = away[seat] !== undefined;
-          const wanted = msg.playerName || away[seat] || `Friend (${label})`;
+          // A phone coming back keeps the name it had (including a " 2" added to tell two Friends apart).
+          const wanted = (rejoined && away[seat]) || msg.playerName || `Friend (${label})`;
           // Two phones with the same name get their seat added, so the scoreboard tells them apart.
           const nameTaken = (Object.keys(contestantsRef.current) as (keyof typeof contestantsRef.current)[]).some(
             (id) => id !== seat && contestantsRef.current[id].name === wanted
@@ -1119,6 +1126,12 @@ export function useGameController() {
           case 'CLIENT_BUZZ': {
             // Timed from when that phone showed the light, so the host's own player has no head start.
             const current = activeClueRef.current;
+            // A tap made before the light is an early buzz even if it arrives after the buzzers opened,
+            // the same as on the host device. The phone already locked itself out for a moment.
+            if (msg.early) {
+              if (current?.phase === 'READING') handleContestantBuzz(seat, Date.now());
+              break;
+            }
             const sameOpening = current?.phase === 'BUZZER_OPEN' && msg.clueId === current.clue.id;
             handleContestantBuzz(
               seat,
@@ -1306,6 +1319,8 @@ export function useGameController() {
     );
 
     p2pRef.current = mgr;
+    // Lets the browser tests cut a phone's connection to check that it reconnects.
+    if (import.meta.env.DEV) (window as unknown as {__p2p?: P2PConnectionManager}).__p2p = mgr;
 
     return () => {
       mgr.destroy();

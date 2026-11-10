@@ -101,6 +101,26 @@ export default function PhoneScreen() {
           </div>
         </header>
 
+        {/* Lost the host mid-game: the phone reconnects by itself and the host keeps the seat and score. */}
+        {gameState.status !== 'START' && p2pStatus !== 'connected' && (
+          <div
+            role="status"
+            className={`relative z-20 mt-2 w-full rounded-xl border px-3 py-2 text-center text-xs font-bold ${
+              p2pStatus === 'connecting' ? 'bg-amber-950/95 border-amber-500 text-amber-200' : 'bg-rose-950/95 border-rose-500 text-rose-100'
+            }`}>
+            {p2pStatus === 'connecting' ? (
+              <span>Reconnecting to the host... Your seat and score are saved.</span>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                {p2pDetail || 'Lost connection to the host.'}
+                <button onClick={() => window.location.reload()} className="px-2 py-1 rounded bg-rose-600 text-white">
+                  Rejoin
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Client Main Body: Dynamic Gamepad Controls */}
         <main className="relative z-10 flex-1 my-3 short:my-1.5 flex flex-col justify-center items-center w-full max-w-lg mx-auto">
           {/* 1. If Match has not started or in Start Screen */}
@@ -165,7 +185,7 @@ export default function PhoneScreen() {
                 <button
                   onClick={() => {
                     if (tooEarly) return;
-                    sendClientBuzz();
+                    sendClientBuzz(true);
                     setTooEarly(true);
                     window.setTimeout(() => setTooEarly(false), EARLY_BUZZ_LOCKOUT_MS + 150);
                   }}
