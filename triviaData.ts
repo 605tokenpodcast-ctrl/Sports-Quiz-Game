@@ -398,8 +398,11 @@ export function checkTypedAnswer(input: string, clue: QuestionClue, threshold = 
     const aliasClean = clean(alias);
     if (!aliasClean) continue;
     if (userClean === aliasClean) return true;
-    // A partial answer, like "mahome" for "mahomes".
-    if (userClean.length >= 3 && aliasClean.includes(userClean) && userClean.length >= aliasClean.length * 0.7) return true;
+    // A partial answer, like "mahome" for "mahomes". Not whole words with one left off, though:
+    // "north carolina" is a different school from North Carolina State.
+    const aliasWords = aliasClean.split(' ');
+    const droppedWholeWord = userClean.split(' ').every((w) => aliasWords.includes(w)) && userClean.split(' ').length < aliasWords.length;
+    if (userClean.length >= 3 && aliasClean.includes(userClean) && userClean.length >= aliasClean.length * 0.7 && !droppedWholeWord) return true;
     // Extra words around an alias are fine ("kc chiefs"), but not a different first name
     // ("emmitt smith" when the answer is Malcolm Smith).
     if (userClean.includes(aliasClean) && userClean.length >= 3) {

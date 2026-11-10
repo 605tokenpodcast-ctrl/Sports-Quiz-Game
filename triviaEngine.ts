@@ -65,14 +65,12 @@ export function sanitizeAnswerChoice(str: string): string {
 }
 
 /**
- * Strips all unnecessary parenthetical expressions, metadata markers, series counters,
- * and contextual annotations from question prompts, guaranteeing clean, concise,
- * natural trivia prompts without visual clutter.
+ * Tidies a clue's spacing and punctuation. Parentheses stay: the question builder writes hints
+ * in them on purpose ("a first-round pick (11th overall)").
  */
 export function sanitizeQuestionClue(str: string): string {
   if (!str) return '';
   return str
-    .replace(/\s*\([^)]*\)/g, '') // remove any parenthetical notes
     .replace(/\s+,/g, ',') // clean up space before comma
     .replace(/\s+\./g, '.') // clean up space before period
     .replace(/\s+\?/g, '?') // clean up space before question mark
@@ -81,8 +79,13 @@ export function sanitizeQuestionClue(str: string): string {
     .trim();
 }
 
-/** The last word of an answer ("Mahomes"), skipping endings like "Jr." or "St." that would match anything. */
+/**
+ * The last word of a person's name ("Mahomes"), skipping endings like "Jr." that would match anything.
+ * Only for people: the last word of a school or stadium ("Florida" in Central Florida, "Stadium")
+ * names something else.
+ */
 function lastNameAlias(answer: string): string {
+  if (answerKind(answer) !== 'person') return '';
   const words = answer.toLowerCase().trim().split(/\s+/);
   const last = words[words.length - 1] || '';
   if (words.length < 2 || /^(jr|sr|ii|iii|iv|v|st)\.?$/.test(last) || /^\d+$/.test(last)) return '';
@@ -307,6 +310,8 @@ export interface CategorySpec {
   }[];
 }
 
+import { collegeName, collegeAliases } from './colleges';
+
 // Import builder helper that creates deep 100+ cohorts per category
 import { BUILT_IN_NFL_SPECS } from './triviaBankData';
 
@@ -366,14 +371,17 @@ export function getAllCompiledCategories(): TriviaCategory[] {
   for (const spec of [...BUILT_IN_NFL_SPECS, ...EXTERNAL_SPECS]) {
     const clues: QuestionClue[] = [];
 
+    // College answers are shown the way a host says them ("Boston College", "Miami of Ohio"),
+    // even in a bank built before the builder did that itself.
+    const isCollege = spec.id.startsWith('nfl_colleges_');
     spec.entries.forEach((raw, idx) => {
-      const cleanAnswer = sanitizeAnswerChoice(raw.answer);
+      const cleanAnswer = sanitizeAnswerChoice(isCollege ? collegeName(raw.answer) : raw.answer);
       const ansNorm = normalizeAnswer(cleanAnswer);
       if (!ansNorm) return;
 
       const signature = `${spec.id}__${idx}__${cleanAnswer}__${raw.difficulty}`;
       const id = raw.id || `q_${createDeterministicHash(signature)}`;
-      const distractors = generateSmartDistractors(cleanAnswer, spec.sport, spec.title, raw.distractors);
+      const distractors = generateSmartDistractors(cleanAnswer, spec.sport, spec.title, isCollege ? raw.distractors.map(collegeName) : raw.distractors);
 
       clues.push({
         id,
@@ -383,13 +391,7 @@ export function getAllCompiledCategories(): TriviaCategory[] {
         clue: sanitizeQuestionClue(raw.clue),
         correctAnswer: cleanAnswer,
         distractors,
-        aliases: Array.from(
-          new Set([
-            cleanAnswer.toLowerCase().trim(),
-            lastNameAlias(cleanAnswer),
-            ...(raw.aliases || []).map((a) => sanitizeAnswerChoice(a).toLowerCase().trim()),
-          ])
-        ).filter(Boolean),
+        aliases: answerAliases(cleanAnswer, raw.aliases || [], isCollege),
         sport: spec.sport,
         difficulty: raw.difficulty,
       });
@@ -408,6 +410,30 @@ export function getAllCompiledCategories(): TriviaCategory[] {
   tagSubjects(result);
   COMPILED_CACHE = result;
   return result;
+}
+
+// Cities with more than one team: "New York" alone doesn't say Giants or Jets.
+const SHARED_TEAM_CITIES = new Set(['new york', 'los angeles', 'ny', 'la', 'l.a.']);
+
+/** Every answer the checker accepts for a clue, in lower case. */
+export function answerAliases(answer: string, extra: string[], isCollege = false): string[] {
+  const kind = answerKind(answer);
+  const all = [
+    answer.toLowerCase().trim(),
+    // A school can look like a name ("Central Florida"), but its last word is another school.
+    isCollege ? '' : lastNameAlias(answer),
+    ...extra.map((a) => sanitizeAnswerChoice(isCollege ? collegeName(a) : a).toLowerCase().trim()),
+    // The raw spelling too ("boston col."), so old answers still count.
+    ...(isCollege ? extra.map((a) => sanitizeAnswerChoice(a).toLowerCase().trim()) : []),
+    ...(isCollege ? collegeAliases(answer) : []),
+    // "Acrisure" for Acrisure Stadium.
+    / Stadium$/.test(answer) ? answer.replace(/ Stadium$/, '').toLowerCase() : '',
+  ];
+  return Array.from(new Set(all)).filter((a) => {
+    if (!a) return false;
+    if (kind === 'team' && SHARED_TEAM_CITIES.has(a)) return false;
+    return true;
+  });
 }
 
 /** Fills in each clue's `subjects`: the people (from every person answer in the bank) it names. */
