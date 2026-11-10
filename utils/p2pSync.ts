@@ -42,6 +42,8 @@ const RECONNECT_GIVE_UP_MS = 120000;
  *   VITE_TURN_USERNAME    the relay account's username
  *   VITE_TURN_CREDENTIAL  the relay account's password
  * With none set, the game uses only the free address-lookup (STUN) servers, as before.
+ * Anything set here is built into the public page where anyone can read it, so only use a
+ * relay login meant to be public (or short-lived), never a private account password.
  */
 export function iceServersFromEnv(e: Record<string, string | undefined>): RTCIceServer[] {
   const servers: RTCIceServer[] = [
