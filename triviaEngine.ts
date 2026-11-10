@@ -493,8 +493,8 @@ export function markClueUsed(q: QuestionClue, used: Set<string>): void {
 
 // Board columns that are too alike to share a board: at most one of each family per round.
 const CATEGORY_FAMILIES: [RegExp, string][] = [
-  [/^nfl_(drafted_by_|draft_steals$|mr_irrelevant$|number_one_picks$)/, 'draft'],
-  [/^nfl_colleges_/, 'college'],
+  // Draft and college columns share a family: at most one per board, so boards aren't mostly draft trivia.
+  [/^nfl_(drafted_by_|draft_steals$|mr_irrelevant$|number_one_picks$|colleges_)/, 'draft'],
   [/^nfl_(passing|rushing|receiving)_leaders$/, 'leaders'],
   [/^nfl_super_bowl/, 'super_bowl'],
 ];
@@ -507,6 +507,8 @@ export const STORY_CATEGORY_IDS = new Set([
   'nfl_conference_title',
   'nfl_records',
   'nfl_records_legends',
+  'nfl_playoff_heroes',
+  'nfl_monster_games',
 ]);
 
 export function getTotalCategoryCount(): number {
@@ -740,6 +742,8 @@ export const FINAL_CATEGORY_IDS = new Set([
   'nfl_receiving_leaders',
   'nfl_records_legends',
   'nfl_franchises_stadiums',
+  'nfl_playoff_heroes',
+  'nfl_monster_games',
 ]);
 
 export function getChampionshipFinalClues(): QuestionClue[] {

@@ -807,6 +807,114 @@ async function main() {
     }
   }
 
+  // ---- Game moments: playoff heroes, monster games, Thanksgiving --------
+  // From every finished season's game-by-game player stats, so the board isn't mostly draft trivia.
+  const gameById = new Map(played.map((g) => [g.game_id, g]));
+  const z = (s: string | undefined) => num(s) || 0;
+  const roundName = (g: Row) => {
+    const s = num(g.season);
+    if (g.game_type === 'SB') return `Super Bowl ${roman(s - 1965)}`;
+    if (g.game_type === 'CON') return `${conference(g.home_team, s)} Championship Game after the ${s} season`;
+    if (g.game_type === 'DIV') return `Divisional round after the ${s} season`;
+    return `Wild Card round after the ${s} season`;
+  };
+  const sideResult = (g: Row, team: string) => {
+    const side = g.home_team === team ? 'home' : 'away';
+    const other = side === 'home' ? 'away' : 'home';
+    const us = num(g[`${side}_score`]), them = num(g[`${other}_score`]);
+    const opp = nickname(name(g, other));
+    const res = us > them ? `in a ${us}-${them} win over the ${opp}` : us < them ? `in a ${them}-${us} loss to the ${opp}` : `in a ${us}-${them} tie with the ${opp}`;
+    return { us, them, opp, res, won: us > them, oppQb: g[`${other}_qb_name`] };
+  };
+  /** One player's best line in a game, in words, and how big a moment it was (0 = not notable). */
+  const statLine = (r: Row): { line: string; score: number } => {
+    const pY = z(r.passing_yards), pT = z(r.passing_tds), rY = z(r.rushing_yards), rT = z(r.rushing_tds);
+    const cY = z(r.receiving_yards), cT = z(r.receiving_tds), rec = z(r.receptions), sk = z(r.def_sacks), int = z(r.def_interceptions);
+    const ydsTds = (yds: number, tds: number) => `${fmt(yds)} yards${tds === 1 ? ' and a touchdown' : tds ? ` and ${tds} touchdowns` : ''}`;
+    const options = [
+      { score: pT >= 3 || pY >= 300 ? pT * 12 + pY / 20 : 0, line: `threw for ${ydsTds(pY, pT)}` },
+      { score: rY >= 120 || rT >= 2 ? rY / 6 + rT * 12 : 0, line: `ran for ${ydsTds(rY, rT)}` },
+      { score: cY >= 120 || cT >= 2 ? cY / 6 + cT * 12 : 0, line: `caught ${plural(rec, 'pass', 'passes')} for ${ydsTds(cY, cT)}` },
+      { score: sk >= 2 ? sk * 18 : 0, line: `racked up ${fmt(sk)} sacks` },
+      { score: int >= 2 ? int * 20 : 0, line: `picked off ${int} passes` },
+    ];
+    return options.sort((a, b) => b.score - a.score)[0];
+  };
+
+  const heroCat = category('playoff_heroes', 'Playoff Heroes', 'Big postseason performances, from the Wild Card round to the Super Bowl.');
+  const monsterCat = category('monster_games', 'Monster Games', 'The biggest single-game performances of each regular season.');
+  for (let s = 1999; s <= lastComplete; s++) {
+    // One season at a time, keeping only the columns used here, so memory stays small.
+    const week = (await loadCsvIfExists(`stats_player_week_${s}.csv`, `${RELEASES}/stats_player/stats_player_week_${s}.csv`)).filter((r) => r.team && gameById.has(r.game_id));
+    if (!week.length) continue;
+    const teamOf = (r: Row) => { try { return teamName(r.team, s); } catch { return ''; } };
+
+    // Playoff heroes: the five biggest postseason performances, one per game.
+    const post = week.filter((r) => r.season_type === 'POST');
+    const postByGroup = (pos: string) => [...new Set(post.filter((x) => posGroup(x.position) === posGroup(pos)).sort((a, b) => z(b.fantasy_points_ppr) - z(a.fantasy_points_ppr)).map((x) => x.player_display_name))];
+    // A big game in a win makes a better story than one in a loss.
+    const heroes = post
+      .map((r) => {
+        const { line, score } = statLine(r);
+        return { r, line, score: score * (sideResult(gameById.get(r.game_id)!, r.team).won ? 1.4 : 1) };
+      })
+      .filter((h) => h.score > 0 && teamOf(h.r))
+      .sort((a, b) => b.score - a.score);
+    const usedGames = new Set<string>();
+    let kept = 0;
+    for (const { r, line } of heroes) {
+      if (kept >= 5 || usedGames.has(r.game_id)) continue;
+      const g = gameById.get(r.game_id)!;
+      const { res } = sideResult(g, r.team);
+      const clue = `In the ${roundName(g)}, this ${nickname(teamOf(r))} ${posWord(r.position)} ${line} ${res}.`;
+      const peers = postByGroup(r.position).filter((n) => n !== r.player_display_name);
+      const before = heroCat.entries.length;
+      add(heroCat, `hero_${r.game_id}_${r.player_id}`, clue, r.player_display_name,
+        pickDistractors(r.player_display_name, peers.slice(0, 4), peers.slice(4, 30), `h${r.game_id}${r.player_id}`),
+        ageDifficulty(s, lastComplete, g.game_type === 'SB' ? 2 : 3), nameAliases(r.player_display_name));
+      if (heroCat.entries.length > before) { usedGames.add(r.game_id); kept++; }
+    }
+
+    // Monster games: the season's single biggest passing, rushing, receiving and sack games.
+    const reg = week.filter((r) => r.season_type === 'REG');
+    const monsterDefs = [
+      { col: 'passing_yards', what: 'passing game', min: 400, verb: (r: Row) => `threw for ${fmt(z(r.passing_yards))} yards` },
+      { col: 'rushing_yards', what: 'rushing game', min: 180, verb: (r: Row) => `ran for ${fmt(z(r.rushing_yards))} yards` },
+      { col: 'receiving_yards', what: 'receiving game', min: 180, verb: (r: Row) => `piled up ${fmt(z(r.receiving_yards))} receiving yards` },
+      { col: 'def_sacks', what: 'sack game', min: 4, verb: (r: Row) => `sacked the quarterback ${fmt(z(r.def_sacks))} times` },
+    ];
+    for (const d of monsterDefs) {
+      const top = leaders(reg, (r) => z(r[d.col]), d.col === 'def_sacks' ? 0.5 : 1);
+      if (!top || z(top[0][d.col]) < d.min || !teamOf(top[0])) continue;
+      const r = top[0];
+      const g = gameById.get(r.game_id)!;
+      const { res } = sideResult(g, r.team);
+      const others = [...new Set(top.slice(1, 12).map((x) => x.player_display_name))].filter((n) => n !== r.player_display_name);
+      add(monsterCat, `monster_${s}_${d.col}`,
+        `In Week ${num(r.week)} of ${s}, this ${nickname(teamOf(r))} ${posWord(r.position)} ${d.verb(r)} ${res}, the biggest ${d.what} of that season.`,
+        r.player_display_name, pickDistractors(r.player_display_name, others.slice(0, 7), [], `m${s}${d.col}`),
+        ageDifficulty(s, lastComplete, 3), nameAliases(r.player_display_name));
+    }
+  }
+
+  // Thanksgiving: every game played on the fourth Thursday of November.
+  const turkeyCat = category('thanksgiving', 'Turkey Day', 'Thanksgiving Day football, from Detroit and Dallas to the night game.');
+  const turkeyGames = regGames.filter((g) => g.weekday === 'Thursday' && /^\d{4}-11-(2[2-8])$/.test(g.gameday));
+  for (const g of turkeyGames.filter((g) => g.home_score !== g.away_score)) {
+    const s = num(g.season);
+    const homeWon = num(g.home_score) > num(g.away_score);
+    const [w, l] = homeWon ? ['home', 'away'] as const : ['away', 'home'] as const;
+    const winner = name(g, w), loser = name(g, l);
+    const hi = num(g[`${w}_score`]), lo = num(g[`${l}_score`]);
+    const qb = g[`${w}_qb_name`];
+    const where = homeWon ? 'at home' : `on the road`;
+    add(turkeyCat, `turkey_${g.game_id}`,
+      `On Thanksgiving ${g.gameday.slice(0, 4)}, ${qb ? `${qb} and ` : ''}this team beat the ${loser} ${hi}-${lo} ${where}.`, winner,
+      // Wrong answers: other teams that played on Thanksgiving within a few years.
+      pickDistractors(winner, [], [...new Set(turkeyGames.filter((x) => Math.abs(num(x.season) - s) <= 4).flatMap((x) => [name(x, 'home'), name(x, 'away')]))].filter((t) => t !== loser), `tg${g.game_id}`),
+      ageDifficulty(s, currentSeason, 2), teamAliases(winner));
+  }
+
   // ---- Draft ---------------------------------------------------------------
   const latestDraft = Math.max(...draft.map((d) => num(d.season)));
   const picksBy = (year: number) => draft.filter((d) => num(d.season) === year);
