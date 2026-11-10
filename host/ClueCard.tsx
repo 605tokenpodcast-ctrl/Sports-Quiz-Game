@@ -1,5 +1,7 @@
 // The open clue on the host screen: buzzers, answer choices or typing, and Daily Double wagers.
-import {Zap, Clock, DollarSign, Star} from 'lucide-react';
+import {useState} from 'react';
+import {Zap, Clock, DollarSign, Star, Flag} from 'lucide-react';
+import {isFlagged, toggleFlag} from '../utils/badQuestions';
 import {gameAudio} from '../utils/helper';
 import TimeLeft from '../utils/TimeLeft';
 import {isOpenAnswerMode} from '../game/types';
@@ -23,7 +25,9 @@ export default function ClueCard() {
     activeContestantsList,
     dailyDoubleClock,
     hostPlays,
+    showToast,
   } = useGame();
+  const [, rerender] = useState(0);
   return (
     <>
       {activeClue && (
@@ -42,6 +46,20 @@ export default function ClueCard() {
                     <span className="text-[9px] text-amber-400 font-bold ml-0.5">DAILY DOUBLE</span>
                   )}
                 </span>
+                {/* Flag a wrong, unclear or dull question: it won't come up on this device again. */}
+                <button
+                  onClick={() => {
+                    const flagged = toggleFlag(activeClue.clue);
+                    rerender((n) => n + 1);
+                    showToast(flagged ? 'Flagged. Send your flags to GitHub from the start screen to remove it for everyone.' : 'Flag removed.');
+                  }}
+                  title={isFlagged(activeClue.clue.id) ? 'Remove the flag' : 'Flag a bad question'}
+                  aria-label={isFlagged(activeClue.clue.id) ? 'Remove the bad question flag' : 'Flag a bad question'}
+                  className={`min-w-[32px] min-h-[32px] flex items-center justify-center rounded-full border ${
+                    isFlagged(activeClue.clue.id) ? 'bg-rose-600 border-rose-400 text-white' : 'bg-slate-950/60 border-slate-700 text-slate-400 hover:text-rose-300'
+                  }`}>
+                  <Flag className="w-3.5 h-3.5" />
+                </button>
               </div>
 
               {/* Mini Contestant Reaction Badges */}

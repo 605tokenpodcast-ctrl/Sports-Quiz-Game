@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  issues: read
 
 jobs:
   refresh:
@@ -19,6 +20,15 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # Questions flagged with the game's Bad question button: ids in the owner's "Bad questions" issues.
+      - name: Collect flagged questions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .cache
+          gh issue list --state all --limit 500 --author "${{ github.repository_owner }}" --search 'in:title "Bad questions"' --json body --jq '.[].body' \
+            | grep -oE 'nfl_[0-9a-f]{12}' | sort -u > .cache/skip-ids.txt || true
+          echo "Leaving out $(wc -l < .cache/skip-ids.txt) flagged questions"
       - run: npm run questions
       # Stop here, before publishing, if the new bank has wrong or broken questions.
       - run: npm run test:bank

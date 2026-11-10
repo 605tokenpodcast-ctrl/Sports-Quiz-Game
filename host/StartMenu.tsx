@@ -6,6 +6,7 @@ import {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {isSpeechSupported} from '../utils/speech';
 import {useGame} from '../game/GameContext';
 import VoiceSettings from './VoiceSettings';
+import FlaggedQuestions from './FlaggedQuestions';
 
 export default function StartMenu() {
   const {
@@ -226,6 +227,8 @@ export default function StartMenu() {
                 ))}
               </div>
             </div>
+
+            <FlaggedQuestions />
 
             {/* Episode code: the same boards on any device, so listeners can play the show's game */}
             <div className="w-full mb-3 text-left">

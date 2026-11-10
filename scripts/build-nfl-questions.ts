@@ -25,6 +25,17 @@ const CACHE = join(ROOT, '.cache', 'nflverse');
 const OUT = join(ROOT, 'public', 'questions', 'nfl.json');
 const OFFLINE = process.argv.includes('--offline');
 
+/**
+ * Question ids to leave out: flagged with the game's Bad question button. The weekly refresh
+ * collects them from the owner's "Bad questions" GitHub issues into .cache/skip-ids.txt;
+ * scripts/skip-questions.txt holds any added by hand. Ids are the "nfl_..." ones in nfl.json.
+ */
+const SKIP_IDS = new Set(
+  [join(dirname(fileURLToPath(import.meta.url)), 'skip-questions.txt'), join(dirname(fileURLToPath(import.meta.url)), '..', '.cache', 'skip-ids.txt')]
+    .filter((f) => existsSync(f))
+    .flatMap((f) => readFileSync(f, 'utf8').match(/nfl_[0-9a-f]{12}/g) ?? [])
+);
+
 const RELEASES = 'https://github.com/nflverse/nflverse-data/releases/download';
 const NFLDATA = 'https://raw.githubusercontent.com/nflverse/nfldata/master/data';
 
@@ -216,6 +227,8 @@ function add(
   difficulty: number,
   aliases: string[] = [answer]
 ) {
+  // Questions flagged as bad in a game (see SKIP_IDS) are left out.
+  if (SKIP_IDS.has(hashId(key))) return;
   // Nothing the clue names, and no Round 1 for a player who "lasted until" a later round.
   distractors = distractors.filter((d) => !namedInClue(clue, d) && !(/lasted until this round/.test(clue) && d === 'Round 1'));
   if (distractors.length < 3) return; // not enough plausible wrong answers to ask it fairly

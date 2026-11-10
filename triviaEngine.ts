@@ -331,6 +331,10 @@ export interface CategorySpec {
 }
 
 import { collegeName, collegeAliases } from './colleges';
+import { flaggedIds } from './utils/badQuestions';
+
+/** Questions the host flagged as bad, left out of games on this device (not for episode codes, which must match everywhere). */
+const flaggedHere = (): Set<string> => (gameRandomSource || typeof localStorage === 'undefined' ? new Set() : flaggedIds());
 
 // Import builder helper that creates deep 100+ cohorts per category
 import { BUILT_IN_NFL_SPECS } from './triviaBankData';
@@ -704,6 +708,7 @@ export function generateBoardForRound(
 
   const selectedBoard: TriviaCategory[] = [];
   const familiesOnBoard = new Set<string>();
+  const flagged = flaggedHere();
 
   for (const cat of order) {
     if (selectedBoard.length >= categoryCount) break;
@@ -712,7 +717,7 @@ export function generateBoardForRound(
 
     // Clues not served yet whose answer and people are new this game, shuffled,
     // with questions this device has never seen first.
-    const eligibleShuffled = fisherYatesShuffle(cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers)));
+    const eligibleShuffled = fisherYatesShuffle(cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers) && !flagged.has(q.id)));
     const eligibleClues = [...eligibleShuffled.filter((q) => !seen.has(q.id)), ...eligibleShuffled.filter((q) => seen.has(q.id))];
 
     // Build the ladder (difficulty 1 to 5, or 1/3/5 for a short game).
@@ -774,9 +779,11 @@ export const FINAL_CATEGORY_IDS = new Set([
 export function getChampionshipFinalClues(): QuestionClue[] {
   const allCategories = getActiveCategories().filter((c) => FINAL_CATEGORY_IDS.has(c.id));
   const clues: QuestionClue[] = [];
+  const flagged = flaggedHere();
 
   allCategories.forEach((cat) => {
     cat.clues.forEach((q) => {
+      if (flagged.has(q.id)) return;
       // Stadium names make poor Finals: hard to spell and easy to half-know.
       // Numbers and scores ("13", "24-10") make poor Finals too: a near miss is still wrong.
       const kind = answerKind(q.correctAnswer);

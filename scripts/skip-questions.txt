@@ -1,0 +1,3 @@
+# Question ids to leave out of the bank, one per line (the "nfl_..." ids from public/questions/nfl.json).
+# Questions flagged with the game's Bad question button are also collected from the owner's
+# "Bad questions" GitHub issues by the weekly refresh, so this file is only for ones added by hand.
