@@ -37,14 +37,31 @@ const RECONNECT_GIVE_UP_MS = 120000;
 
 /**
  * Relay (TURN) servers let phones connect when a direct link is blocked, which is common on
- * cellular data and some guest Wi-Fi. Set at build time:
+ * cellular data and some guest Wi-Fi. When a direct link works, the relay is never used.
+ *
+ * By default the game uses the free public relay run by the PeerJS project, the same people
+ * who run the free signaling broker the game already joins rooms through. It needs no account,
+ * and its login ("peerjs"/"peerjsp") is published by PeerJS for exactly this use. It is shared
+ * and best effort, so a dedicated relay can be added at build time and is tried first:
  *   VITE_TURN_URLS        comma-separated, e.g. "turn:global.relay.example.com:80,turns:global.relay.example.com:443"
  *   VITE_TURN_USERNAME    the relay account's username
  *   VITE_TURN_CREDENTIAL  the relay account's password
- * With none set, the game uses only the free address-lookup (STUN) servers, as before.
+ * The Pages workflow reads these from the repository's Actions variables.
  * Anything set here is built into the public page where anyone can read it, so only use a
  * relay login meant to be public (or short-lived), never a private account password.
  */
+export const PEERJS_RELAY: RTCIceServer = {
+  urls: [
+    'turn:us-0.turn.peerjs.com:3478',
+    'turn:eu-0.turn.peerjs.com:3478',
+    // For networks that block UDP (some carriers and guest Wi-Fi).
+    'turn:us-0.turn.peerjs.com:3478?transport=tcp',
+    'turn:eu-0.turn.peerjs.com:3478?transport=tcp',
+  ],
+  username: 'peerjs',
+  credential: 'peerjsp',
+};
+
 export function iceServersFromEnv(e: Record<string, string | undefined>): RTCIceServer[] {
   const servers: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -53,6 +70,7 @@ export function iceServersFromEnv(e: Record<string, string | undefined>): RTCIce
   ];
   const urls = (e.VITE_TURN_URLS || '').split(',').map((u) => u.trim()).filter(Boolean);
   if (urls.length) servers.push({ urls, username: e.VITE_TURN_USERNAME || '', credential: e.VITE_TURN_CREDENTIAL || '' });
+  servers.push(PEERJS_RELAY);
   return servers;
 }
 
