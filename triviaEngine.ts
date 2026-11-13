@@ -5,7 +5,7 @@
  * loaded at runtime (public/questions/nfl.json, built weekly from nflverse data).
  *
  * Within one game no question, category or answer repeats, and questions this
- * device has already seen are used last.
+ * group has seen recently are held back (see utils/questionHistory.ts).
  */
 
 export type SportTag = 'NFL';
@@ -332,6 +332,7 @@ export interface CategorySpec {
 
 import { collegeName, collegeAliases } from './colleges';
 import { flaggedIds } from './utils/badQuestions';
+import { freshestFirst, heldBackCount, isHeldBack, markShown, resetHistory, shownCount } from './utils/questionHistory';
 
 /** Questions the host flagged as bad, left out of games on this device (not for episode codes, which must match everywhere). */
 const flaggedHere = (): Set<string> => (gameRandomSource || typeof localStorage === 'undefined' ? new Set() : flaggedIds());
@@ -558,38 +559,21 @@ export function getTotalAvailableQuestionCount(): number {
 // PERSISTENCE & ANTI-REPEAT QUESTION TRACKING
 // ===========================================================================
 
-const SEEN_HASHES_STORAGE_KEY = 'sports_arena_seen_hashes_v20';
-const SEEN_COUNTER_STORAGE_KEY = 'sports_arena_seen_count_v20';
+// What the group has been shown lives in utils/questionHistory.ts (with the day each was shown),
+// shared between the host and the phones so recently seen questions are held back.
 
-const SEEN_HASH_SET = new Set<string>();
-let SEEN_TOTAL_COUNT = 0;
-let HAS_HYDRATED = false;
+/** Whether to hold back what this group has seen. An episode code deals the same boards everywhere, so it ignores history. */
+const useHistory = () => !gameRandomSource;
 
-function hydrateSeenStore(): void {
-  if (HAS_HYDRATED) return;
-  HAS_HYDRATED = true;
-  if (typeof window === 'undefined' || !window.localStorage) return;
-  try {
-    const rawCount = localStorage.getItem(SEEN_COUNTER_STORAGE_KEY);
-    if (rawCount) {
-      SEEN_TOTAL_COUNT = parseInt(rawCount, 10) || 0;
-    }
-    const raw = localStorage.getItem(SEEN_HASHES_STORAGE_KEY);
-    if (raw) {
-      const arr: string[] = JSON.parse(raw);
-      if (Array.isArray(arr)) {
-        arr.forEach((h) => SEEN_HASH_SET.add(h));
-      }
-    }
-  } catch (e) {}
+/** True if this group saw the question recently (within HOLD_BACK_DAYS) and it should wait its turn. */
+export function isRecentlySeen(id: string): boolean {
+  return useHistory() && isHeldBack(id);
 }
 
-export function getSeenQuestionIds(): Set<string> {
-  hydrateSeenStore();
-  // An episode code deals the same boards everywhere, so what this device has seen can't matter.
-  return gameRandomSource ? NOTHING_SEEN : SEEN_HASH_SET;
+/** Questions freshest first (never seen, then seen longest ago). With an episode code, the order given. */
+export function freshFirst<T extends {id: string}>(items: T[]): T[] {
+  return useHistory() ? freshestFirst(items) : items;
 }
-const NOTHING_SEEN = new Set<string>();
 
 // While an episode code deals a game, every random pick comes from it instead of Math.random.
 let gameRandomSource: (() => number) | null = null;
@@ -610,41 +594,21 @@ export function dealWith<T>(random: (() => number) | null, deal: () => T): T {
   }
 }
 
-export function markQuestionSeen(id: string): void {
-  markQuestionsSeen([id]);
-}
-
-/** Marks questions as seen on this device, saving the list once for the whole batch. */
+/** Records that the group was just shown these questions (on this device). */
 export function markQuestionsSeen(ids: string[]): void {
-  hydrateSeenStore();
-  const fresh = ids.filter((id) => !SEEN_HASH_SET.has(id));
-  if (!fresh.length) return;
-  for (const id of fresh) SEEN_HASH_SET.add(id);
-  SEEN_TOTAL_COUNT += fresh.length;
-
-  if (typeof window !== 'undefined' && window.localStorage) {
-    try {
-      localStorage.setItem(SEEN_COUNTER_STORAGE_KEY, SEEN_TOTAL_COUNT.toString());
-      const sample = Array.from(SEEN_HASH_SET).slice(-50000);
-      localStorage.setItem(SEEN_HASHES_STORAGE_KEY, JSON.stringify(sample));
-    } catch (e) {}
-  }
+  markShown(ids);
 }
 
 export function resetSeenQuestions(): void {
-  SEEN_HASH_SET.clear();
-  SEEN_TOTAL_COUNT = 0;
-  if (typeof window !== 'undefined' && window.localStorage) {
-    try {
-      localStorage.removeItem(SEEN_HASHES_STORAGE_KEY);
-      localStorage.removeItem(SEEN_COUNTER_STORAGE_KEY);
-    } catch (e) {}
-  }
+  resetHistory();
 }
 
 export function getSeenQuestionsCount(): number {
-  hydrateSeenStore();
-  return Math.max(SEEN_TOTAL_COUNT, SEEN_HASH_SET.size);
+  return shownCount();
+}
+
+export function getHeldBackCount(): number {
+  return heldBackCount();
 }
 
 export function fisherYatesShuffle<T>(items: T[]): T[] {
@@ -714,22 +678,21 @@ export function generateBoardForRound(
   featuredCategoryId?: string
 ): TriviaCategory[] {
   const allCategories = getActiveCategories();
-  const seen = getSeenQuestionIds();
   const layout = BOARD_LAYOUTS[gameLength];
   const targetValues = layout.values[round];
   const ladderSize = targetValues.length;
 
   // Pick categories whose ID has NOT been used in this match session,
-  // favouring ones that still have plenty of questions this device hasn't seen.
+  // favouring ones that still have a full ladder of questions the group hasn't seen recently.
   const usedTypes = new Set([...usedCategoryIds].map(categoryType));
   const availableCats = allCategories.filter((c) => !usedCategoryIds.has(c.id) && !usedTypes.has(categoryType(c.id)));
-  const unseenCount = (c: TriviaCategory) => c.clues.filter((q) => !seen.has(q.id)).length;
+  const freshCount = (c: TriviaCategory) => c.clues.filter((q) => !isRecentlySeen(q.id)).length;
   const order = [
-    ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) >= ladderSize)),
-    ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) < ladderSize)),
+    ...fisherYatesShuffle(availableCats.filter((c) => freshCount(c) >= ladderSize)),
+    ...fisherYatesShuffle(availableCats.filter((c) => freshCount(c) < ladderSize)),
   ];
   // The featured category (this week's games) is tried first so it makes the board even
-  // when this device has seen it all, then a story column, then the rest.
+  // when the group has seen it all, then a story column, then the rest.
   const story = order.find((c) => STORY_CATEGORY_IDS.has(c.id) && c.id !== featuredCategoryId);
   if (story) order.unshift(...order.splice(order.indexOf(story), 1));
   const featuredIdx = order.findIndex((c) => c.id === featuredCategoryId);
@@ -745,9 +708,11 @@ export function generateBoardForRound(
     if (familiesOnBoard.has(family) || usedTypes.has(categoryType(cat.id))) continue;
 
     // Clues not served yet whose answer and people are new this game, shuffled,
-    // with questions this device has never seen first.
-    const eligibleShuffled = fisherYatesShuffle(cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers) && !flagged.has(q.id)));
-    const eligibleClues = [...eligibleShuffled.filter((q) => !seen.has(q.id)), ...eligibleShuffled.filter((q) => seen.has(q.id))];
+    // freshest first: never seen, then seen longest ago.
+    const eligibleClues = freshFirst(
+      fisherYatesShuffle(cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers) && !flagged.has(q.id)))
+    );
+    const fresh = (q: QuestionClue) => !isRecentlySeen(q.id);
 
     // Build the ladder (difficulty 1 to 5, or 1/3/5 for a short game).
     const ladderClues: QuestionClue[] = [];
@@ -755,12 +720,12 @@ export function generateBoardForRound(
     for (let ladderIdx = 0; ladderIdx < ladderSize; ladderIdx++) {
       const targetDiff = layout.difficulties[ladderIdx];
       const isFree = (q: QuestionClue) => !ladderClues.some((c) => c.id === q.id) && !clueOverlaps(q, localUsed);
-      // Prefer an unseen exact difficulty match, then an unseen clue one level off,
-      // then any unseen clue, then a seen one at the right level, then anything left.
+      // Prefer a fresh exact difficulty match, then a fresh clue one level off, then any fresh
+      // clue, then a recently seen one at the right level, then anything left (the board must fill).
       const candidate =
-        eligibleClues.find((q) => !seen.has(q.id) && q.difficulty === targetDiff && isFree(q)) ||
-        eligibleClues.find((q) => !seen.has(q.id) && Math.abs(q.difficulty - targetDiff) === 1 && isFree(q)) ||
-        eligibleClues.find((q) => !seen.has(q.id) && isFree(q)) ||
+        eligibleClues.find((q) => fresh(q) && q.difficulty === targetDiff && isFree(q)) ||
+        eligibleClues.find((q) => fresh(q) && Math.abs(q.difficulty - targetDiff) === 1 && isFree(q)) ||
+        eligibleClues.find((q) => fresh(q) && isFree(q)) ||
         eligibleClues.find((q) => q.difficulty === targetDiff && isFree(q)) ||
         eligibleClues.find(isFree);
       if (!candidate) break;
@@ -773,7 +738,6 @@ export function generateBoardForRound(
         usedQuestionIds.add(c.id);
         markClueUsed(c, usedAnswers);
       });
-      markQuestionsSeen(ladderClues.map((c) => c.id));
       usedCategoryIds.add(cat.id);
       familiesOnBoard.add(family);
       usedTypes.add(categoryType(cat.id));

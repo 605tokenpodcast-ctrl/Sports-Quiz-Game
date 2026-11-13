@@ -1,5 +1,7 @@
 // Picking the host voice and splitting clues for reading aloud.
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {pronounce, pronunciationList} from '../utils/pronunciation';
 import {answerLine, splitSentences, spokenText, spokenYear, voiceScore} from '../utils/speech';
 
 let failed = 0;
@@ -78,7 +80,7 @@ check('years are read as years', () => {
 
 check('St. is Saint before a name and State after a school', () => {
   assert.equal(spokenText('beat the St. Louis Rams'), 'beat the Saint Louis Rams');
-  assert.equal(spokenText('Amon-Ra St. Brown'), 'Amon-Ra Saint Brown');
+  assert.equal(spokenText('Amon-Ra St. Brown'), 'Ay-mon Rah Saint Brown');
   assert.equal(spokenText('Fresno St. receiver'), 'Fresno State receiver');
   assert.equal(spokenText('played at Ohio St.'), 'played at Ohio State');
 });
@@ -95,6 +97,44 @@ check('names, picks, scores, records and Super Bowls read naturally', () => {
   assert.equal(spokenText('stumbled to a league-worst 2-15 in 2023'), 'stumbled to a league-worst 2 and 15 in twenty twenty-three');
   assert.equal(spokenText('quarterbacked the Rams to a 23-16 win'), 'quarterbacked the Rams to a 23 to 16 win');
   assert.equal(spokenText('beating the Packers 28-22.'), 'beating the Packers 28 to 22.');
+});
+
+check('hard names are read the way they are said', () => {
+  assert.equal(spokenText('Travis Kelce caught it from Patrick Mahomes.'), 'Travis Kel-see caught it from Patrick Muh-homes.');
+  assert.equal(spokenText("Kelce's 2 touchdowns"), "Kel-see's 2 touchdowns", 'possessives');
+  assert.equal(spokenText('Ja’Marr Chase'), 'Juh-mar Chase', 'curly apostrophes');
+  assert.equal(spokenText('the San Francisco 49ers'), 'the San Francisco Forty-Niners');
+  assert.equal(spokenText('Texas A&M receiver Mike Evans'), 'Texas A and M receiver Mike Evans');
+  assert.equal(spokenText('AT&T Stadium'), 'A T and T Stadium');
+  assert.equal(spokenText('Super Bowl LI at NRG Stadium'), 'Super Bowl 51 at N R G Stadium');
+  assert.equal(spokenText('Brett Favre and Ben Roethlisberger'), 'Brett Farv and Ben Roth-liss-burger');
+  assert.equal(spokenText('Ndamukong Suh'), 'En-dom-uh-kong Soo');
+  assert.equal(spokenText('Cairo Santos kicked in Cairo'), 'Ky-roh Santos kicked in Cairo', 'longer entries only');
+  assert.equal(spokenText('Suhr and Tuan and Osier'), 'Suhr and Tuan and Osier', 'whole words only');
+  assert.equal(spokenText('the USC Trojans and UTEP'), 'the U S C Trojans and You-tep');
+});
+
+check('every respelling is safe to read', () => {
+  const seen = new Set<string>();
+  for (const [written, spoken] of pronunciationList()) {
+    assert.ok(!seen.has(written), `${written} is listed twice`);
+    seen.add(written);
+    assert.ok(!/[.!?;\d]/.test(spoken), `${written}: respellings can't have periods or digits ("${spoken}")`);
+    assert.equal(pronounce(written), spoken, `${written} is replaced`);
+  }
+});
+
+check('the whole question bank reads quickly, with no "&" left', () => {
+  const bank = JSON.parse(readFileSync(new URL('../public/questions/nfl.json', import.meta.url), 'utf8'));
+  const texts: string[] = [];
+  for (const c of bank.categories) for (const e of c.entries) texts.push(c.title, e.clue, e.answer, ...e.distractors);
+  const start = performance.now();
+  const spoken = texts.map(spokenText);
+  const ms = performance.now() - start;
+  for (const t of spoken) assert.ok(!t.includes('&'), `"&" left in: ${t}`);
+  // A clue is a fraction of a millisecond; the whole bank (~40,000 lines) well under a second.
+  assert.ok(ms < 1500, `bank took ${ms.toFixed(0)}ms`);
+  console.log(`    ${texts.length} lines in ${ms.toFixed(0)}ms`);
 });
 
 if (failed) {

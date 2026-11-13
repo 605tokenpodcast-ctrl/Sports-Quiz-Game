@@ -1,3 +1,4 @@
+import {getSeason, mergeSeason} from './season';
 export type OpponentMode =
   | 'ROOKIE_AI'
   | 'PRO_AI'
@@ -199,7 +200,7 @@ const readBoard = (store: KeyStore, key: string): LeaderboardEntry[] => {
   }
 };
 
-/** Every saved leaderboard on this device, as the text of a backup file. */
+/** Every saved leaderboard and the podcast season standings on this device, as the text of a backup file. */
 export function leaderboardBackup(store: KeyStore = localStorage): string {
   const boards: Record<string, LeaderboardEntry[]> = {};
   for (let i = 0; i < store.length; i++) {
@@ -208,15 +209,15 @@ export function leaderboardBackup(store: KeyStore = localStorage): string {
     const entries = readBoard(store, key);
     if (entries.length) boards[key] = entries;
   }
-  return JSON.stringify({kind: BACKUP_KIND, version: 1, savedAt: new Date().toISOString(), boards}, null, 2);
+  return JSON.stringify({kind: BACKUP_KIND, version: 2, savedAt: new Date().toISOString(), boards, season: getSeason(store)}, null, 2);
 }
 
 /**
  * Adds a backup's scores to this device's leaderboards. Scores already here are kept, the same
  * score is never added twice, and each board keeps its top 10. Throws if the file isn't a backup.
  */
-export function restoreLeaderboardBackup(text: string, store: KeyStore = localStorage): {boards: number; added: number} {
-  let data: {kind?: string; boards?: Record<string, unknown>};
+export function restoreLeaderboardBackup(text: string, store: KeyStore = localStorage): {boards: number; added: number; seasonPlayers: number} {
+  let data: {kind?: string; boards?: Record<string, unknown>; season?: unknown};
   try {
     data = JSON.parse(text);
   } catch {
@@ -240,7 +241,9 @@ export function restoreLeaderboardBackup(text: string, store: KeyStore = localSt
     store.setItem(key, JSON.stringify(merged));
     boards++;
   }
-  return {boards, added};
+  // Backups from before the season standings existed have no season; that's fine.
+  const seasonPlayers = mergeSeason(data.season, store);
+  return {boards, added, seasonPlayers};
 }
 
 /** Saves the backup as a file in the browser's downloads. */

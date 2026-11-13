@@ -16,9 +16,11 @@ import {
   clueOverlaps,
   markClueUsed,
   getSeenQuestionsCount,
-  getSeenQuestionIds,
+  isRecentlySeen,
+  freshFirst,
+  getHeldBackCount,
+  markQuestionsSeen,
   gameRandom,
-  markQuestionSeen,
   resetSeenQuestions,
   getTotalAvailableQuestionCount,
   getTotalCategoryCount,
@@ -234,8 +236,6 @@ export function getFreshFinalShowdownClue(
   usedQuestionIds: Set<string>,
   usedAnswers: Set<string>
 ): QuestionClue {
-  const seen = getSeenQuestionIds();
-
   // Hand-written finals plus every hard clue in the current pool (including runtime banks).
   const byId = new Map<string, QuestionClue>();
   for (const q of [...FINAL_SHOWDOWN_QUESTIONS, ...getChampionshipFinalClues()]) {
@@ -246,11 +246,12 @@ export function getFreshFinalShowdownClue(
 
   // Strict check: Question ID not in session, AND normalized answer not in usedAnswers
   // Not used this game, and not about anyone already asked about.
-  const candidates = finalPool.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers) && !seen.has(q.id));
-  const fallbackCandidates = finalPool.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers));
+  const candidates = finalPool.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers) && !isRecentlySeen(q.id));
+  // Everything recently seen: take the one the group saw longest ago.
+  const fallbackCandidates = freshFirst(finalPool.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers))).slice(0, 1);
 
   // The hand-written Finals are the best ones, so they come up about a third of the time
-  // while this device still has some it hasn't seen.
+  // while the group still has some it hasn't seen recently.
   const handWritten = candidates.filter((q) => q.id.startsWith('final_'));
   const pool =
     handWritten.length > 0 && gameRandom() < 0.35
@@ -265,7 +266,6 @@ export function getFreshFinalShowdownClue(
 
   usedQuestionIds.add(picked.id);
   markClueUsed(picked, usedAnswers);
-  markQuestionSeen(picked.id);
   return picked;
 }
 

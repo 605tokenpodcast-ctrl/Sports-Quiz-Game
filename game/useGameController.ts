@@ -12,6 +12,8 @@ import {
   createFullGameSession,
   dealWith,
   getSeenQuestionsCount,
+  getHeldBackCount,
+  markQuestionsSeen,
   getTotalAvailableQuestionCount,
   getTotalCategoryCount,
   loadExternalQuestionBank,
@@ -23,6 +25,7 @@ import {
 import {useWakeLock} from '../utils/wakeLock';
 import {newEpisodeCode, normalizeEpisodeCode, episodeLength, seededRandom} from '../utils/episode';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
+import {exportHistory, mergeHistory} from '../utils/questionHistory';
 import {
   answerLine,
   streakLine,
@@ -124,6 +127,9 @@ export const categoryIntroLines = (round: RoundType, board: {title: string; desc
     return `${opener}${cat.title}.${about}`;
   });
 
+/** Where the host's chosen AI level is remembered. */
+const AI_LEVEL_KEY = 'quiz_ai_difficulty';
+
 const spokenClue = (clue: QuestionClue, text = clue.clue): SpeechPart[] => [
   {text: `${clue.category}, for ${spokenMoney(clue.value)}!`, hype: true},
   text,
@@ -194,6 +200,7 @@ export function useGameController() {
     resetSeason();
     setSeasonRows([]);
   };
+  const reloadSeason = () => setSeasonRows(seasonStandings(getSeason()));
   const [highScoreCelebration, setHighScoreCelebration] = useState<{
     rank: number;
     isHighScore: boolean;
@@ -205,7 +212,22 @@ export function useGameController() {
   } | null>(null);
 
   // Game setup options
-  const [difficulty, setDifficulty] = useState<AIDifficulty>('MEDIUM');
+  // The AI level is remembered on this device, so the show's usual level is picked every time.
+  const [difficulty, setDifficulty] = useState<AIDifficulty>(() => {
+    try {
+      const saved = localStorage.getItem(AI_LEVEL_KEY);
+      return saved === 'EASY' || saved === 'MEDIUM' || saved === 'HARD' || saved === 'EXPERT' ? saved : 'MEDIUM';
+    } catch {
+      return 'MEDIUM';
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(AI_LEVEL_KEY, difficulty);
+    } catch {
+      // storage blocked: the level just isn't remembered
+    }
+  }, [difficulty]);
   const [answerMode, setAnswerMode] = useState<AnswerMode>('STANDARD');
   // Full: 6 categories x 5 clues per round. Short: 5 categories x 3 clues per round.
   const [gameLength, setGameLengthState] = useState<GameLength>(() => {
@@ -319,6 +341,9 @@ export function useGameController() {
   const seenQuestionsCount = useMemo(() => {
     return getSeenQuestionsCount();
   }, [seenCountRefresh, gameState.status, currentRound]);
+  const heldBackQuestionsCount = useMemo(() => {
+    return getHeldBackCount();
+  }, [seenCountRefresh, gameState.status, currentRound]);
 
   const totalQuestionCount = useMemo(() => {
     return getTotalAvailableQuestionCount();
@@ -394,6 +419,18 @@ export function useGameController() {
   const [finalPlayer2Input, setFinalPlayer2Input] = useState('');
   const [player3FinalWager, setPlayer3FinalWager] = useState(1000);
   const [finalPlayer3Input, setFinalPlayer3Input] = useState('');
+
+  // Every device (host, phones, stream screen) remembers each question it actually showed,
+  // so a tile nobody opened isn't held back, and any device can bring the group's history
+  // to the next game it hosts or joins.
+  const shownClueId = activeClue?.clue.id;
+  useEffect(() => {
+    if (shownClueId) markQuestionsSeen([shownClueId]);
+  }, [shownClueId]);
+  const shownFinalId = currentRound === 'FINAL_SHOWDOWN' && finalShowdownPhase !== 'WAGER' ? finalClue?.id : undefined;
+  useEffect(() => {
+    if (shownFinalId) markQuestionsSeen([shownFinalId]);
+  }, [shownFinalId]);
   // Multiple choice games get choices in the Final too (empty for typed and mic-only games).
   const [finalOptions, setFinalOptions] = useState<string[]>([]);
 
@@ -1118,6 +1155,10 @@ export function useGameController() {
             p2pRef.current?.disconnectPeer(fromPeerId);
             return;
           }
+          // Pool what this phone has been shown with what the host has, and hand the group's
+          // history back, so recently seen questions are held back whichever device hosts next.
+          if (mergeHistory(msg.history)) setSeenCountRefresh((c) => c + 1);
+          p2pRef.current?.send({type: 'QUESTION_HISTORY', history: exportHistory()}, fromPeerId);
           const next = {...seats, [fromPeerId]: seat};
           remoteSeatsRef.current = next;
           if (msg.deviceId) seatDevicesRef.current = {...seatDevices, [seat]: msg.deviceId};
@@ -1225,6 +1266,10 @@ export function useGameController() {
 
       // 2. Phones and stream screens receive state updates from Host
       if (deviceRole !== 'HOST') {
+        if (msg.type === 'QUESTION_HISTORY') {
+          if (mergeHistory(msg.history)) setSeenCountRefresh((c) => c + 1);
+          return;
+        }
         if (msg.type === 'ROOM_FULL') {
           setP2PStatus('error');
           setP2PDetail(
@@ -2307,6 +2352,7 @@ export function useGameController() {
     bankStatus,
     loadBank,
     seenQuestionsCount,
+    heldBackQuestionsCount,
     totalQuestionCount,
     totalCategoryCount,
     activeSelector,
@@ -2366,6 +2412,7 @@ export function useGameController() {
     finalReveal,
     finalShownFor,
     seasonRows,
+    reloadSeason,
     startNewSeason,
     sendClientBuzz,
     recapMomentsList,

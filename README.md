@@ -40,8 +40,16 @@ npm run questions
 
 The **Refresh NFL questions** GitHub Action does this every Tuesday, which keeps the
 "this week" and "this season" categories current. Every game has one current column on
-each board: **This Week in the NFL** in Round 1 and the **season so far** in Round 2. Each device remembers
-which questions it has seen and skips them until it runs out.
+each board: **This Week in the NFL** in Round 1 and the **season so far** in Round 2.
+
+**Question freshness.** Every device remembers each question it was shown and the day it was
+shown (utils/questionHistory.ts). When a phone joins, it hands its history to the host and gets
+the group's history back, so whichever device hosts next knows what the group has seen.
+Questions the group saw in the last 90 days are held back; when a category runs low, the ones
+seen longest ago come back first, so boards always fill. Tiles nobody opened don't count.
+Episode codes ignore history so every listener gets the same boards.
+`npm run test:history` checks the rules and `npm run test:group-history` checks the phone hand-off
+in a browser (it needs `npm i --no-save peer@1`).
 `npm run simulate` plays 40 simulated games and reports how often questions repeat.
 
 ## Playing on several phones

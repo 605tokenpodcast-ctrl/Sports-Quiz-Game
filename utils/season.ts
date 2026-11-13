@@ -1,6 +1,7 @@
 // Podcast season standings: a running table of every person who has played on this device,
 // across games (episodes). Kept on the host device next to the leaderboards.
 type KeyStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+type ReadWrite = Pick<Storage, 'getItem' | 'setItem'>;
 
 export interface SeasonRow {
   name: string;
@@ -32,7 +33,7 @@ function storage(): KeyStore | null {
   }
 }
 
-export function getSeason(store: KeyStore | null = storage()): SeasonRow[] {
+export function getSeason(store: ReadWrite | null = storage()): SeasonRow[] {
   if (!store) return [];
   try {
     const rows = JSON.parse(store.getItem(SEASON_KEY) || '[]');
@@ -46,7 +47,7 @@ export function getSeason(store: KeyStore | null = storage()): SeasonRow[] {
 export const seasonStandings = (rows: SeasonRow[]) => [...rows].sort((a, b) => b.wins - a.wins || b.money - a.money || a.name.localeCompare(b.name));
 
 /** Adds one game's results to the season. Players are matched by name, ignoring case. */
-export function recordSeasonGame(results: SeasonResult[], store: KeyStore | null = storage(), now = new Date()): SeasonRow[] {
+export function recordSeasonGame(results: SeasonResult[], store: ReadWrite | null = storage(), now = new Date()): SeasonRow[] {
   const rows = getSeason(store);
   for (const r of results) {
     const name = r.name.trim().slice(0, 24);
@@ -72,6 +73,45 @@ export function recordSeasonGame(results: SeasonResult[], store: KeyStore | null
     // Storage full or blocked: the season just isn't saved this time.
   }
   return seasonStandings(rows);
+}
+
+const isRow = (r: unknown): r is SeasonRow => {
+  const x = r as SeasonRow;
+  return (
+    !!x && typeof x.name === 'string' && !!x.name.trim() &&
+    ['games', 'wins', 'money', 'bestScore', 'finalsRight', 'finalsPlayed'].every((k) => Number.isFinite((x as unknown as Record<string, number>)[k])) &&
+    typeof x.lastPlayed === 'string'
+  );
+};
+
+/**
+ * Puts season standings from a backup onto this device. A person on both keeps whichever row
+ * has more games (then the later one), so restoring the same backup twice never doubles anyone.
+ * Returns how many people were added or brought up to date.
+ */
+export function mergeSeason(incoming: unknown, store: ReadWrite | null = storage()): number {
+  if (!Array.isArray(incoming)) return 0;
+  const rows = getSeason(store);
+  let changed = 0;
+  for (const r of incoming.filter(isRow)) {
+    const row: SeasonRow = {...r, name: r.name.trim().slice(0, 24)};
+    const i = rows.findIndex((x) => keyOf(x.name) === keyOf(row.name));
+    if (i < 0) {
+      rows.push(row);
+      changed++;
+    } else if (row.games > rows[i].games || (row.games === rows[i].games && row.lastPlayed > rows[i].lastPlayed)) {
+      rows[i] = row;
+      changed++;
+    }
+  }
+  if (changed) {
+    try {
+      store?.setItem(SEASON_KEY, JSON.stringify(rows));
+    } catch {
+      return 0;
+    }
+  }
+  return changed;
 }
 
 /** Starts a new season. */
