@@ -30,7 +30,7 @@ export default function StartMenu() {
     bankInfo,
     bankStatus,
     loadBank,
-    seenQuestionsCount,
+    heldBackQuestionsCount,
     totalQuestionCount,
     totalCategoryCount,
     contestants,
@@ -94,14 +94,14 @@ export default function StartMenu() {
             <div className="w-full mb-3 px-3 py-1.5 bg-emerald-950/70 border border-emerald-700/80 rounded-xl text-[11px] text-emerald-300 flex items-center justify-between">
               <div className="flex items-center gap-1.5 font-bold">
                 <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Repeat Protection: Active</span>
+                <span>Question Freshness: On</span>
               </div>
               <span className="font-mono text-slate-200">
-                {Math.min(seenQuestionsCount, totalQuestionCount).toLocaleString()} / {totalQuestionCount.toLocaleString()} seen
+                {Math.min(heldBackQuestionsCount, totalQuestionCount).toLocaleString()} / {totalQuestionCount.toLocaleString()} held back
               </span>
             </div>
             <div className="w-full text-center text-[10px] text-emerald-400/90 font-medium mb-2">
-              This device skips questions it has already seen until it runs out
+              Questions your group saw in the last 90 days are held back. Phones that join add what they've seen.
             </div>
 
             {/* Game Mode: Solo vs Cross-Device vs Pass & Play */}

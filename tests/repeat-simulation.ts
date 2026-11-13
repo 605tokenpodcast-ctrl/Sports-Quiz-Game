@@ -23,6 +23,8 @@ for (let g = 1; g <= 40; g++) {
   const ids = boards.flatMap((c) => c.clues.map((q) => q.id));
   repeated.push(Math.round((100 * ids.filter((id) => seen.has(id)).length) / ids.length));
   ids.forEach((id) => seen.add(id));
+  // Dealing no longer marks questions; playing them does. Treat every game as fully played.
+  T.markQuestionsSeen([...ids, s.finalClue.id]);
 }
 console.log(`${T.getTotalAvailableQuestionCount()} NFL questions`);
 console.log(`% of each board already seen, games 1-40: ${repeated.join(', ')}`);
