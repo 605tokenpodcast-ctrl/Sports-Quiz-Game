@@ -41,6 +41,7 @@ export default function LeaderboardModal() {
     displayedLeaderboardEntries,
     myBestRecord,
     seasonRows,
+    reloadSeason,
     startNewSeason,
   } = useGame();
   const backupInputRef = useRef<HTMLInputElement>(null);
@@ -48,9 +49,14 @@ export default function LeaderboardModal() {
   const restoreBackup = async (file: File | undefined) => {
     if (!file) return;
     try {
-      const {added} = restoreLeaderboardBackup(await file.text());
+      const {added, seasonPlayers} = restoreLeaderboardBackup(await file.text());
       setLeaderboardRefreshCounter((c) => c + 1);
-      showToast(added ? `✓ Restored ${added} score${added === 1 ? '' : 's'} from the backup` : 'Those scores are already here');
+      reloadSeason();
+      const parts = [
+        added && `${added} score${added === 1 ? '' : 's'}`,
+        seasonPlayers && `${seasonPlayers} season player${seasonPlayers === 1 ? '' : 's'}`,
+      ].filter(Boolean);
+      showToast(parts.length ? `✓ Restored ${parts.join(' and ')} from the backup` : 'Everything in that backup is already here');
     } catch (e) {
       showToast((e as Error).message || 'Could not read that backup.');
     }
@@ -313,7 +319,7 @@ export default function LeaderboardModal() {
             {/* Backup: leaderboards live in this browser only */}
             <div className="flex flex-wrap items-center gap-2 mb-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
               <span className="text-[11px] text-slate-400 flex-1 min-w-[160px]">
-                Scores are saved in this browser only. Keep a backup so clearing it doesn't wipe them.
+                Scores and the season standings are saved in this browser only. Keep a backup so clearing it (or switching laptops) doesn't wipe the season.
               </span>
               <button
                 onClick={() => {

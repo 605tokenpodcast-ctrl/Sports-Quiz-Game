@@ -124,6 +124,9 @@ export const categoryIntroLines = (round: RoundType, board: {title: string; desc
     return `${opener}${cat.title}.${about}`;
   });
 
+/** Where the host's chosen AI level is remembered. */
+const AI_LEVEL_KEY = 'quiz_ai_difficulty';
+
 const spokenClue = (clue: QuestionClue, text = clue.clue): SpeechPart[] => [
   {text: `${clue.category}, for ${spokenMoney(clue.value)}!`, hype: true},
   text,
@@ -194,6 +197,7 @@ export function useGameController() {
     resetSeason();
     setSeasonRows([]);
   };
+  const reloadSeason = () => setSeasonRows(seasonStandings(getSeason()));
   const [highScoreCelebration, setHighScoreCelebration] = useState<{
     rank: number;
     isHighScore: boolean;
@@ -205,7 +209,22 @@ export function useGameController() {
   } | null>(null);
 
   // Game setup options
-  const [difficulty, setDifficulty] = useState<AIDifficulty>('MEDIUM');
+  // The AI level is remembered on this device, so the show's usual level is picked every time.
+  const [difficulty, setDifficulty] = useState<AIDifficulty>(() => {
+    try {
+      const saved = localStorage.getItem(AI_LEVEL_KEY);
+      return saved === 'EASY' || saved === 'MEDIUM' || saved === 'HARD' || saved === 'EXPERT' ? saved : 'MEDIUM';
+    } catch {
+      return 'MEDIUM';
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(AI_LEVEL_KEY, difficulty);
+    } catch {
+      // storage blocked: the level just isn't remembered
+    }
+  }, [difficulty]);
   const [answerMode, setAnswerMode] = useState<AnswerMode>('STANDARD');
   // Full: 6 categories x 5 clues per round. Short: 5 categories x 3 clues per round.
   const [gameLength, setGameLengthState] = useState<GameLength>(() => {
@@ -2366,6 +2385,7 @@ export function useGameController() {
     finalReveal,
     finalShownFor,
     seasonRows,
+    reloadSeason,
     startNewSeason,
     sendClientBuzz,
     recapMomentsList,
