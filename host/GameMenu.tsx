@@ -16,6 +16,7 @@ export default function GameMenu() {
     playerName,
     setGameState,
     seenQuestionsCount,
+    heldBackQuestionsCount,
     totalQuestionCount,
     openTagEditorModal,
     handleResetQuestionHistory,
@@ -41,14 +42,14 @@ export default function GameMenu() {
               <div className="flex items-center justify-between text-xs font-bold text-emerald-300">
                 <span className="flex items-center gap-1">
                   <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Zero-Repeat Protection: Active</span>
+                  <span>Question Freshness: On</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">
-                  {seenQuestionsCount} / {totalQuestionCount} Pool
+                  {heldBackQuestionsCount} held back
                 </span>
               </div>
               <div className="text-[10px] text-emerald-400/80 mt-1 font-semibold">
-                New questions come first. Ones this device has seen only come back when a category runs low.
+                New questions come first. Ones your group saw in the last 90 days wait their turn unless a category runs low.
               </div>
             </div>
 

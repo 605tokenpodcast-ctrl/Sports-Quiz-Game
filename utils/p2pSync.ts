@@ -4,10 +4,14 @@
 // their taps, the host broadcasts the full game state back to everyone.
 
 import Peer, {DataConnection} from 'peerjs';
+import {exportHistory, type SharedHistory} from './questionHistory';
 
 export type P2PMessage =
   | { type: 'STATE_SYNC'; payload: any }
-  | { type: 'CLIENT_JOIN'; playerName?: string; deviceId?: string }
+  // history: the questions this phone has been shown, so the host can hold them back.
+  | { type: 'CLIENT_JOIN'; playerName?: string; deviceId?: string; history?: SharedHistory }
+  // Host to a phone that just joined: the group's question history, so that phone can host next time.
+  | { type: 'QUESTION_HISTORY'; history: SharedHistory }
   | { type: 'SCREEN_JOIN' } // a big-screen stream view that only watches
   // reactionMs: how long after this phone showed the open buzzer the player tapped (for clueId).
   // early: tapped while this phone still showed "wait for the light" (it may reach the host after the light).
@@ -300,7 +304,7 @@ export class P2PConnectionManager {
       this.lostHostAt = 0;
       this.setupDataConnection(conn);
       this.callbacks.onStatus('connected', back ? 'Back in the game!' : 'Connected to the host!');
-      this.send(this.joinAs === 'screen' ? { type: 'SCREEN_JOIN' } : { type: 'CLIENT_JOIN', playerName: this.playerName, deviceId: P2PConnectionManager.deviceId() });
+      this.send(this.joinAs === 'screen' ? { type: 'SCREEN_JOIN' } : { type: 'CLIENT_JOIN', playerName: this.playerName, deviceId: P2PConnectionManager.deviceId(), history: exportHistory() });
     });
 
     conn.on('error', (err: any) => {
