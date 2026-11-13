@@ -235,13 +235,34 @@ export const AI_HINT_READ_SECONDS = 1.5;
  * hint is a coin flip weighted by how likely it is to know (a sure AI tends to go earlier).
  * `shown` hints are already up (after a miss every hint is up and there's no wait).
  */
-export function aiWhoAmIWaitMs(total: number, shown: number, correctChance: number, random: () => number = Math.random): number {
+export function aiWhoAmIWaitMs(
+  total: number,
+  shown: number,
+  correctChance: number,
+  random: () => number = Math.random,
+  gaps: number[] = []
+): number {
   if (total < 2) return 0;
   let needed = 2;
   while (needed < total && random() > correctChance) needed++;
-  const hintsToWaitFor = needed - Math.max(1, shown);
-  if (hintsToWaitFor <= 0) return 0;
-  return (hintsToWaitFor * HINT_SECONDS + AI_HINT_READ_SECONDS) * 1000;
+  const from = Math.max(1, shown);
+  if (needed - from <= 0) return 0;
+  // The wait for each hint still to come (gaps[k - 1] seconds after hint k shows, or the usual gap).
+  let wait = 0;
+  for (let k = from; k < needed; k++) wait += gaps[k - 1] ?? HINT_SECONDS;
+  return (wait + AI_HINT_READ_SECONDS) * 1000;
+}
+
+/**
+ * Seconds each hint stays up before the next one appears: gaps[k - 1] follows hint k.
+ * Read aloud, a hint that takes longer than the usual gap to say gets the time it needs, so
+ * the next hint never cuts it off. The first hint is read before the buzzers open.
+ */
+export function hintGaps(hints: string[] | undefined, readAloud: boolean, rate: number): number[] {
+  if (!hints || hints.length < 2) return [];
+  // A number is said as several words ("1994", "218th"), so it counts for three.
+  const spoken = (h: string) => h.replace(/\S*\d\S*/g, 'one two three');
+  return hints.slice(0, -1).map((h, i) => (readAloud && i > 0 ? Math.max(HINT_SECONDS, readingSeconds(spoken(h), 0, rate) + 0.5) : HINT_SECONDS));
 }
 
 /** A tile's value with `shown` of `total` hints up: full with one hint, then down by equal steps (rounded to $100). */
@@ -343,7 +364,7 @@ export type ClueTimeUp =
   | {kind: 'answer-timed-out'; who: ContestantId}
   | {kind: 'done'};
 
-export function clueTimeUp(prev: ActiveClueState, questionTimeLimit: number, now: number): ClueTimeUp {
+export function clueTimeUp(prev: ActiveClueState, questionTimeLimit: number, now: number, gaps?: number[]): ClueTimeUp {
   switch (prev.phase) {
     case 'READING':
       return {
@@ -351,7 +372,7 @@ export function clueTimeUp(prev: ActiveClueState, questionTimeLimit: number, now
         next: {
           ...prev,
           // A Who Am I? clue keeps the buzzers open long enough for every hint to show.
-          ...startCountdown(questionTimeLimit + Math.max(0, hintCount(prev) - 1) * HINT_SECONDS, now),
+          ...startCountdown(questionTimeLimit + (gaps && hintCount(prev) ? gaps.reduce((x, y) => x + y, 0) : Math.max(0, hintCount(prev) - 1) * HINT_SECONDS), now),
           phase: 'BUZZER_OPEN',
           feedbackText: 'BUZZERS ACTIVE! Buzz in now!',
         },

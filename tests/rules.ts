@@ -27,6 +27,7 @@ import {
   isOnFire,
   remoteBuzzTime,
   HINT_SECONDS,
+  hintGaps,
   aiWhoAmIWaitMs,
   hintValue,
   shownClueText,
@@ -287,6 +288,14 @@ check('Who Am I? shows one hint at a time and the tile is worth less with each o
   assert.equal(aiWhoAmIWaitMs(3, 1, 0.2, late), (2 * HINT_SECONDS + 1.5) * 1000, 'an unsure AI waits for the last hint');
   assert.equal(aiWhoAmIWaitMs(3, 3, 0.2, late), 0, 'after a miss every hint is up, so no wait');
   assert.equal(aiWhoAmIWaitMs(0, 1, 0.9), 0, 'not a Who Am I? clue');
+  // Read aloud, a long hint holds the next one back until it has been said.
+  const hints = ['This center made 6 Pro Bowls.', 'He was a first-round pick (2nd overall) in 2001, and made his name with the Cowboys.', 'The Colts drafted him out of Georgia.'];
+  assert.deepEqual(hintGaps(hints, false, 1.2), [HINT_SECONDS, HINT_SECONDS], 'not read aloud: the usual gap');
+  const gaps = hintGaps(hints, true, 1.2);
+  assert.equal(gaps[0], HINT_SECONDS, 'the first hint was read before the buzzers opened');
+  assert.ok(gaps[1] > HINT_SECONDS + 2, `a long second hint gets the time to be read (${gaps[1]}s)`);
+  assert.deepEqual(hintGaps(['One.', 'Short one.', 'Last.'], true, 1.2), [HINT_SECONDS, HINT_SECONDS], 'short hints keep the usual gap');
+  assert.equal(aiWhoAmIWaitMs(3, 1, 0.2, late, gaps), (gaps[0] + gaps[1] + 1.5) * 1000, 'an AI waiting for the last hint waits out the long one');
   for (let i = 0; i < 500; i++) assert.ok(aiWhoAmIWaitMs(3, 1, Math.random()) >= HINT_SECONDS * 1000, 'never before hint 2');
   console.log('ok   Who Am I? AI waits for hint 2 or later, and a moment to read it');
 }

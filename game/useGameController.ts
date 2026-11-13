@@ -92,7 +92,7 @@ import {
   aiCorrectChance,
   aiBuzzChance,
   updateStreaks,
-  HINT_SECONDS,
+  hintGaps,
   aiWhoAmIWaitMs,
   hintCount,
   shownClueText,
@@ -259,6 +259,7 @@ export function useGameController() {
   });
   const hostPlaysRef = useRef(hostPlays);
   hostPlaysRef.current = hostPlays;
+  const readAloudRef = useRef(false);
   // Read each clue aloud. The buzzers wait until it has been read. The stream screen does the
   // reading when one is connected, otherwise the host device does.
   const [readAloud, setReadAloudState] = useState(() => {
@@ -268,6 +269,7 @@ export function useGameController() {
       return false;
     }
   });
+  readAloudRef.current = readAloud;
   const setReadAloud = useCallback((on: boolean) => {
     setReadAloudState(on);
     if (on) unlockSpeech();
@@ -1609,7 +1611,7 @@ export function useGameController() {
   const onClueTimeUp = () => {
     const prev = activeClueRef.current;
     if (!prev || prev.endsAt === null) return;
-    const step = clueTimeUp(prev, SETTINGS.questionTimeLimit, Date.now());
+    const step = clueTimeUp(prev, SETTINGS.questionTimeLimit, Date.now(), hintGaps(prev.clue.hints, readAloudRef.current, speechRate()));
     if (step.kind === 'buzzers-open') {
       gameAudio.playHoverMicroTone();
       commitClue(step.next);
@@ -1689,7 +1691,8 @@ export function useGameController() {
     // On a Who Am I? clue an AI never buzzes on the first hint, and waits for a later hint
     // (plus a moment to read it) before its usual reaction time, so a human gets a fair shot.
     const hints = hintCount(activeClue);
-    const hintWait = (who: 'coach' | 'analyst') => (hints ? aiWhoAmIWaitMs(hints, activeClue.hintsShown ?? 1, chance(who)) : 0);
+    const hintWait = (who: 'coach' | 'analyst') =>
+      hints ? aiWhoAmIWaitMs(hints, activeClue.hintsShown ?? 1, chance(who), Math.random, hintGaps(activeClue.clue.hints, readAloud, speechRate())) : 0;
     const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait('coach');
     const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait('analyst');
 
@@ -1720,7 +1723,8 @@ export function useGameController() {
       if (!prev || prev.clue.id !== clueId || prev.phase !== 'BUZZER_OPEN') return;
       const next = {...prev, hintsShown: (prev.hintsShown ?? 1) + 1};
       commitClue({...next, feedbackText: `New hint! Now worth $${currentWorth(next).toLocaleString()}.`});
-    }, HINT_SECONDS * 1000);
+      // Read aloud, the hint on screen gets the time it takes to say before the next one shows.
+    }, (hintGaps(activeClue.clue.hints, readAloud, speechRate())[shown - 1] ?? 4) * 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceRole, activeClue?.clue.id, activeClue?.phase, activeClue?.hintsShown, activeClue?.endsAt === null]);
