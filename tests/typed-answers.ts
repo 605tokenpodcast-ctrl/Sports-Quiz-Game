@@ -15,12 +15,12 @@ const findClue = (answer: string) => {
 
 const cases: [string, string, boolean][] = [
   // [correct answer, what the player typed, should it count?]
-  ['Round 2', 'Round 2', true],
-  ['Round 2', 'round two', true],
-  ['Round 2', '2nd', true],
-  ['Round 2', 'Round 3', false],
-  ['Round 2', 'round', false],
-  ['Round 2', '12', false],
+  ['Round 4', 'Round 4', true],
+  ['Round 4', 'round four', true],
+  ['Round 4', '4th', true],
+  ['Round 4', 'Round 3', false],
+  ['Round 4', 'round', false],
+  ['Round 4', '14', false],
   ['23-16', '23-16', true],
   ['23-16', '23 16', true],
   ['23-16', '23-17', false],
