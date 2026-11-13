@@ -61,6 +61,20 @@ const cases: [string, string, boolean][] = [
   ['Peyton Manning', 'Eli Manning', false],
   ['Peyton Manning', 'peyton maning', true],
   ['Peyton Manning', 'manning', true],
+  // Short and long first names are the same person.
+  ['Patrick Mahomes', 'Pat Mahomes', true],
+  ['Patrick Mahomes', 'Peyton Mahomes', false],
+  ['Matthew Stafford', 'matt stafford', true],
+  ['Tom Brady', 'Thomas Brady', true],
+  // A team that moved counts under any of its names, but not another team's.
+  ['Oakland Raiders', 'Las Vegas Raiders', true],
+  ['Las Vegas Raiders', 'oakland raiders', true],
+  ['St. Louis Rams', 'Los Angeles Rams', true],
+  ['San Diego Chargers', 'LA Chargers', true],
+  ['San Diego Chargers', 'Los Angeles Rams', false],
+  ['Washington Redskins', 'Commanders', true],
+  ['Washington Redskins', 'Washington Commanders', true],
+  ['Oakland Raiders', 'Oakland Athletics', false],
 ];
 
 async function main() {

@@ -438,6 +438,45 @@ export function getAllCompiledCategories(): TriviaCategory[] {
   return result;
 }
 
+// First names people shorten or lengthen: "Pat Mahomes" is Patrick Mahomes.
+const FIRST_NAME_GROUPS: string[][] = [
+  ['pat', 'patrick'], ['mike', 'michael'], ['matt', 'matthew'], ['tom', 'thomas', 'tommy'], ['joe', 'joseph', 'joey'],
+  ['dan', 'daniel', 'danny'], ['dave', 'david'], ['steve', 'steven', 'stephen'], ['chris', 'christopher'], ['tony', 'anthony'],
+  ['rob', 'robert', 'bob', 'bobby'], ['bill', 'william', 'will', 'billy'], ['jim', 'james', 'jimmy'], ['ben', 'benjamin'],
+  ['nick', 'nicholas'], ['josh', 'joshua'], ['drew', 'andrew', 'andy'], ['alex', 'alexander'], ['sam', 'samuel'],
+  ['zach', 'zachary', 'zack'], ['jake', 'jacob'], ['ken', 'kenneth', 'kenny'], ['ron', 'ronald', 'ronnie'], ['don', 'donald', 'donnie'],
+  ['ed', 'edward', 'eddie'], ['rich', 'richard', 'rick', 'ricky'], ['greg', 'gregory'], ['jeff', 'jeffrey'], ['tim', 'timothy'],
+  ['jon', 'jonathan'], ['john', 'johnny'], ['charlie', 'charles', 'chuck'], ['fred', 'frederick', 'freddie'], ['larry', 'lawrence'],
+  ['terry', 'terrence'], ['cam', 'cameron'], ['gabe', 'gabriel'], ['nate', 'nathan', 'nathaniel'], ['phil', 'philip', 'phillip'],
+  ['pete', 'peter'], ['ray', 'raymond'], ['vince', 'vincent'], ['walt', 'walter'], ['randy', 'randall'], ['russ', 'russell'],
+  ['len', 'leonard', 'lenny'], ['mitch', 'mitchell'], ['vic', 'victor'], ['wes', 'wesley'], ['dom', 'dominic'], ['frank', 'frankie'],
+  ['ted', 'teddy', 'theodore'],
+];
+
+/** "pat mahomes" for Patrick Mahomes, and "patrick" for a Pat. */
+function firstNameAliases(answer: string): string[] {
+  if (answerKind(answer) !== 'person') return [];
+  const [first, ...rest] = answer.toLowerCase().trim().split(/\s+/);
+  const group = FIRST_NAME_GROUPS.find((g) => g.includes(first));
+  return group && rest.length ? group.filter((n) => n !== first).map((n) => [n, ...rest].join(' ')) : [];
+}
+
+// One franchise under the names it has gone by: "Las Vegas Raiders" counts for the Oakland Raiders.
+const FRANCHISE_NAMES: string[][] = [
+  ['Oakland Raiders', 'Los Angeles Raiders', 'Las Vegas Raiders'],
+  ['Los Angeles Rams', 'St. Louis Rams'],
+  ['San Diego Chargers', 'Los Angeles Chargers'],
+  ['Washington Redskins', 'Washington Football Team', 'Washington Commanders', 'Commanders'],
+  ['St. Louis Cardinals', 'Phoenix Cardinals', 'Arizona Cardinals'],
+  ['Baltimore Colts', 'Indianapolis Colts'],
+  ['Houston Oilers', 'Tennessee Oilers'],
+];
+
+function franchiseAliases(answer: string): string[] {
+  const group = FRANCHISE_NAMES.find((g) => g.includes(answer));
+  return group ? group.filter((n) => n !== answer).map((n) => n.toLowerCase()) : [];
+}
+
 // Cities with more than one team: "New York" alone doesn't say Giants or Jets.
 const SHARED_TEAM_CITIES = new Set(['new york', 'los angeles', 'ny', 'la', 'l.a.']);
 
@@ -448,6 +487,8 @@ export function answerAliases(answer: string, extra: string[], isCollege = false
     answer.toLowerCase().trim(),
     // A school can look like a name ("Central Florida"), but its last word is another school.
     isCollege ? '' : lastNameAlias(answer),
+    ...(isCollege ? [] : firstNameAliases(answer)),
+    ...franchiseAliases(answer),
     ...extra.map((a) => sanitizeAnswerChoice(isCollege ? collegeName(a) : a).toLowerCase().trim()),
     // The raw spelling too ("boston col."), so old answers still count.
     ...(isCollege ? extra.map((a) => sanitizeAnswerChoice(a).toLowerCase().trim()) : []),
@@ -476,7 +517,8 @@ function tagSubjects(categories: TriviaCategory[]): void {
   for (const cat of categories) {
     for (const q of cat.clues) {
       const kind = answerKind(q.correctAnswer);
-      if (kind === 'person') people.set(q.correctAnswer, normalizeAnswer(q.correctAnswer));
+      // A school can look like a name ("Notre Dame", "North Carolina"), and it isn't a person.
+      if (kind === 'person' && !cat.id.startsWith('nfl_colleges_')) people.set(q.correctAnswer, normalizeAnswer(q.correctAnswer));
       else if (kind === 'other' && VENUE_ANSWER.test(q.correctAnswer)) venues.set(q.correctAnswer.toLowerCase(), normalizeAnswer(q.correctAnswer));
     }
   }
@@ -539,6 +581,7 @@ export const categoryType = (id: string) => CATEGORY_TYPES.find(([re]) => re.tes
 /** Big-game and famous-season columns. Every board gets at least one, besides the current column. */
 export const STORY_CATEGORY_IDS = new Set([
   'nfl_super_bowl',
+  'nfl_super_bowl_mvps',
   'nfl_super_bowl_details',
   'nfl_conference_title',
   'nfl_records',
@@ -756,6 +799,7 @@ export function generateBoardForRound(
  */
 export const FINAL_CATEGORY_IDS = new Set([
   'nfl_super_bowl',
+  'nfl_super_bowl_mvps',
   'nfl_super_bowl_details',
   'nfl_conference_title',
   'nfl_records',
