@@ -380,6 +380,16 @@ export async function loadExternalQuestionBank(url = 'questions/nfl.json', attem
   return null;
 }
 
+/** The host's own column (from a Google Sheet, see utils/customColumn.ts), or null to remove it. */
+let customColumnId: string | null = null;
+export function setCustomColumn(spec: CategorySpec | null): void {
+  const at = EXTERNAL_SPECS.findIndex((c) => c.id === customColumnId);
+  if (at >= 0) EXTERNAL_SPECS.splice(at, 1);
+  customColumnId = spec ? spec.id : null;
+  if (spec) EXTERNAL_SPECS.push(spec);
+  COMPILED_CACHE = null;
+}
+
 /** Categories in play. The game is NFL only, so other sports in the old bank are skipped. */
 export function getActiveCategories(): TriviaCategory[] {
   return getAllCompiledCategories().filter((c) => c.sport === 'NFL');
@@ -831,6 +841,10 @@ export function generateBoardForRound(
   }
   const featuredIdx = order.findIndex((c) => c.id === featuredCategoryId);
   if (featuredIdx > 0) order.unshift(...order.splice(featuredIdx, 1));
+  // The host's own column always makes Round 1 (not with an episode code: other devices don't have it).
+  const customIdx = order.findIndex((c) => c.id === customColumnId);
+  if (round === 'ROUND_1' && useHistory() && customIdx >= 0) order.unshift(...order.splice(customIdx, 1));
+  else if (customIdx >= 0) order.splice(customIdx, 1);
 
   const selectedBoard: TriviaCategory[] = [];
   const familiesOnBoard = new Set<string>();
