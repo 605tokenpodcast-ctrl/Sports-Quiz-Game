@@ -505,6 +505,11 @@ export function useGameController() {
   const awaySeatsRef = useRef(awaySeats);
   // Host: which phone (by its device id) last sat in each seat.
   const seatDevicesRef = useRef<Partial<Record<RemoteSeat, string>>>({});
+  // Host: phones that asked to join after the game started, waiting for the host's OK.
+  const pendingJoinsRef = useRef<Record<string, Extract<P2PMessage, {type: 'CLIENT_JOIN'}>>>({});
+  const [pendingJoins, setPendingJoins] = useState<{peerId: string; name: string}[]>([]);
+  // Phone: the room is locked and the host has been asked to let this phone in.
+  const [joinWaiting, setJoinWaiting] = useState(false);
   const player2Away = awaySeats.player2 !== undefined;
   // Only a phone playing P1 (when the host doesn't play) can be away.
   const player1Away = awaySeats.player !== undefined;
@@ -1111,7 +1116,7 @@ export function useGameController() {
 
   // P2P Message Dispatcher for Host & Client
   const handleP2PMessage = useCallback(
-    (msg: P2PMessage, fromPeerId: string) => {
+    (msg: P2PMessage, fromPeerId: string, admitted = false) => {
       // 1. Host receives events from friends' phones
       if (deviceRole === 'HOST') {
         if (msg.type === 'SCREEN_JOIN') {
@@ -1124,6 +1129,26 @@ export function useGameController() {
         if (msg.type === 'CLIENT_JOIN') {
           let seats = remoteSeatsRef.current;
           if (seats[fromPeerId]) return;
+          // Once the game is on, the room is locked. A phone that was in it (same device)
+          // walks back in; any other phone waits for the host to let it in or turn it away.
+          const known = msg.deviceId ? Object.values(seatDevicesRef.current).includes(msg.deviceId) : false;
+          // With no seat to give, the phone is told the room is full below.
+          const anySeat = remoteSeatsFor(hostPlaysRef.current).some((s) => !Object.values(seats).includes(s));
+          if (gameStatusRef.current === 'PLAYING' && !known && !admitted && anySeat) {
+            const pending = pendingJoinsRef.current;
+            if (pending[fromPeerId]) return;
+            if (Object.keys(pending).length >= 3) {
+              p2pRef.current?.send({type: 'JOIN_DENIED'}, fromPeerId);
+              p2pRef.current?.disconnectPeer(fromPeerId);
+              return;
+            }
+            p2pRef.current?.hold(fromPeerId);
+            pendingJoinsRef.current = {...pending, [fromPeerId]: msg};
+            setPendingJoins((list) => [...list, {peerId: fromPeerId, name: (msg.playerName || 'A phone').slice(0, 24)}]);
+            p2pRef.current?.send({type: 'JOIN_WAITING'}, fromPeerId);
+            gameAudio.playConfirmSelect();
+            return;
+          }
           // A phone that reloaded comes back before its old connection is noticed as gone:
           // the same device id as a seated phone means it replaces that connection. Names
           // aren't enough here, since two friends can easily share the default name.
@@ -1272,7 +1297,19 @@ export function useGameController() {
           if (mergeHistory(msg.history)) setSeenCountRefresh((c) => c + 1);
           return;
         }
+        if (msg.type === 'JOIN_WAITING') {
+          setJoinWaiting(true);
+          return;
+        }
+        if (msg.type === 'JOIN_DENIED') {
+          setJoinWaiting(false);
+          setP2PStatus('error');
+          setP2PDetail('This game has already started and the host did not let this phone in.');
+          p2pRef.current?.destroy();
+          return;
+        }
         if (msg.type === 'ROOM_FULL') {
+          setJoinWaiting(false);
           setP2PStatus('error');
           setP2PDetail(
             'This room already has 3 players. To play on this phone, open the game link on it (without scanning) and host from here instead.'
@@ -1283,6 +1320,7 @@ export function useGameController() {
         }
         if (msg.type === 'STATE_SYNC') {
           const s = msg.payload;
+          setJoinWaiting(false);
           if (s.seats) {
             const mine = s.seats[p2pRef.current?.peerId ?? ''];
             if (mine) setMySeat(mine);
@@ -1334,6 +1372,23 @@ export function useGameController() {
   const handleP2PMessageRef = useRef(handleP2PMessage);
   handleP2PMessageRef.current = handleP2PMessage;
 
+  /** Host: let in, or turn away, a phone that asked to join after the game started. */
+  const answerJoinRequest = useCallback((peerId: string, letIn: boolean) => {
+    const msg = pendingJoinsRef.current[peerId];
+    if (!msg) return;
+    const pending = {...pendingJoinsRef.current};
+    delete pending[peerId];
+    pendingJoinsRef.current = pending;
+    setPendingJoins((list) => list.filter((j) => j.peerId !== peerId));
+    p2pRef.current?.release(peerId);
+    if (letIn) {
+      handleP2PMessageRef.current(msg, peerId, true);
+    } else {
+      p2pRef.current?.send({type: 'JOIN_DENIED'}, peerId);
+      p2pRef.current?.disconnectPeer(peerId);
+    }
+  }, []);
+
   // Initialize P2P Connection Manager
   useEffect(() => {
     if (p2pRef.current) {
@@ -1364,6 +1419,13 @@ export function useGameController() {
           if (screenPeersRef.current.delete(peerId)) {
             setScreenCount(screenPeersRef.current.size);
             showToast('📺 Stream screen disconnected');
+            return;
+          }
+          if (pendingJoinsRef.current[peerId]) {
+            const pending = {...pendingJoinsRef.current};
+            delete pending[peerId];
+            pendingJoinsRef.current = pending;
+            setPendingJoins((list) => list.filter((j) => j.peerId !== peerId));
             return;
           }
           const seats = {...remoteSeatsRef.current};
@@ -2384,6 +2446,9 @@ export function useGameController() {
     setClientWager,
     p2pRef,
     remoteSeats,
+    pendingJoins,
+    answerJoinRequest,
+    joinWaiting,
     mySeat,
     hostPlays,
     setHostPlays,

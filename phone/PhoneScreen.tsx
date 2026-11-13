@@ -40,6 +40,7 @@ export default function PhoneScreen() {
     setClientWager,
     p2pRef,
     mySeat,
+    joinWaiting,
     finalLocks,
     showToast,
     answerByVoice,
@@ -77,7 +78,7 @@ export default function PhoneScreen() {
               </div>
               <div className="text-[10px] flex items-center gap-1">
                 <span className={`w-2 h-2 rounded-full ${p2pStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                <span className="text-slate-300">{p2pStatus === 'connected' ? 'Synced with Host' : p2pDetail || 'Connecting...'}</span>
+                <span className="text-slate-300">{p2pStatus === 'connected' ? (joinWaiting ? 'Waiting for the host' : 'Synced with Host') : p2pDetail || 'Connecting...'}</span>
               </div>
             </div>
           </div>
@@ -130,12 +131,14 @@ export default function PhoneScreen() {
                 <Smartphone className="w-6 h-6 text-amber-400 animate-bounce" />
               </div>
               <h2 className="text-lg font-black text-amber-400 uppercase">
-                {p2pStatus === 'error' ? 'COULD NOT JOIN' : p2pStatus === 'connected' ? `CONNECTED AS PLAYER ${myLabel.slice(1)}` : 'CONNECTING...'}
+                {p2pStatus === 'error' ? 'COULD NOT JOIN' : joinWaiting ? 'ASKING THE HOST' : p2pStatus === 'connected' ? `CONNECTED AS PLAYER ${myLabel.slice(1)}` : 'CONNECTING...'}
               </h2>
               <p className="text-xs text-slate-300">
                 {p2pStatus === 'error'
                   ? p2pDetail
-                  : 'You are locked in for the match! Waiting for the host to pick the settings and start the game.'}
+                  : joinWaiting
+                    ? 'This game has already started. Waiting for the host to let you in.'
+                    : 'You are locked in for the match! Waiting for the host to pick the settings and start the game.'}
               </p>
               <div className="text-[11px] text-emerald-400 font-bold bg-emerald-950/80 px-3 py-1.5 rounded-full border border-emerald-700 flex items-center gap-1.5">
                 <Wifi className="w-3.5 h-3.5" />
