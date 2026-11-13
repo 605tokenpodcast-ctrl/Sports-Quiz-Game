@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules && npm run -s test:length && npm run -s test:leaderboard && npm run -s test:speech && npm run -s test:options && npm run -s test:bank && npm run -s test:season && npm run -s test:ice && npm run -s test:choices && npm run -s test:episode && npm run -s test:history && npm run -s test:big-plays",
+    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules && npm run -s test:length && npm run -s test:leaderboard && npm run -s test:speech && npm run -s test:options && npm run -s test:bank && npm run -s test:season && npm run -s test:ice && npm run -s test:choices && npm run -s test:episode && npm run -s test:history && npm run -s test:variety && npm run -s test:big-plays",
     "dev": "vite",
     "build": "vite build",
     "questions": "tsx scripts/build-nfl-questions.ts",
@@ -30,6 +30,7 @@
     "test:episode": "tsx tests/episode.ts",
     "test:history": "tsx tests/question-history.ts",
     "test:group-history": "node tests/group-history.mjs",
+    "test:variety": "tsx tests/board-variety.ts",
     "test:big-plays": "tsx tests/big-plays.ts"
   },
   "keywords": [],

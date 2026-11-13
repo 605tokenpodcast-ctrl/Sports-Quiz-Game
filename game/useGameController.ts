@@ -14,6 +14,8 @@ import {
   getSeenQuestionsCount,
   getHeldBackCount,
   markQuestionsSeen,
+  markCluePeopleSeen,
+  rememberGameColumns,
   getTotalAvailableQuestionCount,
   getTotalCategoryCount,
   loadExternalQuestionBank,
@@ -450,6 +452,16 @@ export function useGameController() {
   useEffect(() => {
     if (shownClueId) markQuestionsSeen([shownClueId]);
   }, [shownClueId]);
+  // Who the clue was about is remembered too. A phone only learns that with the reveal.
+  const shownPeople = activeClue?.clue.people;
+  useEffect(() => {
+    if (activeClue && shownPeople?.length) markCluePeopleSeen(activeClue.clue);
+  }, [shownClueId, shownPeople?.join('|')]);
+  // Once a game is under way on the host, its columns are the ones the next game steers away from.
+  const gameUnderWay = deviceRole === 'HOST' && Boolean(shownClueId);
+  useEffect(() => {
+    if (gameUnderWay) rememberGameColumns([...round1Board, ...round2Board].map((c) => c.id));
+  }, [gameUnderWay, round1Board, round2Board]);
   const shownFinalId = currentRound === 'FINAL_SHOWDOWN' && finalShowdownPhase !== 'WAGER' ? finalClue?.id : undefined;
   useEffect(() => {
     if (shownFinalId) markQuestionsSeen([shownFinalId]);

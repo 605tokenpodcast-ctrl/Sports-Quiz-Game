@@ -29,6 +29,8 @@ export interface QuestionClue {
    * give away another's answer.
    */
   subjects?: string[];
+  /** The people among the subjects, so the group isn't asked about the same person week after week. */
+  people?: string[];
   /** Who Am I?: the clue as hints, hardest first, shown one at a time as the tile's value drops. */
   hints?: string[];
 }
@@ -332,7 +334,7 @@ export interface CategorySpec {
 
 import { collegeName, collegeAliases } from './colleges';
 import { flaggedIds } from './utils/badQuestions';
-import { freshestFirst, heldBackCount, isHeldBack, markShown, resetHistory, shownCount } from './utils/questionHistory';
+import {freshestFirst, heldBackCount, isHeldBack, markShown, resetHistory, shownCount, isPersonHeldBack, markPeopleShown, lastGameColumns, rememberColumns} from './utils/questionHistory';
 
 /** Questions the host flagged as bad, left out of games on this device (not for episode codes, which must match everywhere). */
 const flaggedHere = (): Set<string> => (gameRandomSource || typeof localStorage === 'undefined' ? new Set() : flaggedIds());
@@ -522,6 +524,7 @@ function tagSubjects(categories: TriviaCategory[]): void {
       else if (kind === 'other' && VENUE_ANSWER.test(q.correctAnswer)) venues.set(q.correctAnswer.toLowerCase(), normalizeAnswer(q.correctAnswer));
     }
   }
+  const personNames = new Set(people.values());
   // Runs of 2 to 4 capitalized words, the shape of a name ("Patrick Mahomes", "Kenneth Walker III").
   const nameRun = /[A-Z][A-Za-z.'\-]+(?: [A-Z][A-Za-z.'\-]+){1,3}/g;
   for (const cat of categories) {
@@ -545,6 +548,7 @@ function tagSubjects(categories: TriviaCategory[]): void {
       for (const m of q.clue.matchAll(/\bSuper Bowl ([IVXLC]+)\b/g)) found.add(`superbowl${m[1].toLowerCase()}`);
       if (/^Super Bowl [IVXLC]+$/.test(q.correctAnswer)) found.add(`superbowl${q.correctAnswer.slice(11).toLowerCase()}`);
       q.subjects = [...found];
+      q.people = q.subjects.filter((s) => personNames.has(s));
     }
   }
 }
@@ -563,9 +567,12 @@ export function markClueUsed(q: QuestionClue, used: Set<string>): void {
 // Board columns that are too alike to share a board: at most one of each family per round.
 const CATEGORY_FAMILIES: [RegExp, string][] = [
   // Draft and college columns share a family: at most one per board, so boards aren't mostly draft trivia.
-  [/^nfl_(drafted_by_|draft_steals$|mr_irrelevant$|number_one_picks$|colleges_)/, 'draft'],
+  [/^nfl_(drafted_by_|draft_steals$|mr_irrelevant$|number_one_picks$|colleges_|common_thread$)/, 'draft'],
   [/^nfl_(passing|rushing|receiving)_leaders$/, 'leaders'],
   [/^nfl_super_bowl/, 'super_bowl'],
+  [/^nfl_(head_coaches|coaching_carousel)$/, 'coaches'],
+  [/^nfl_(fantasy_studs|waiver_wire)$/, 'fantasy'],
+  [/^nfl_(highlight_reel|comeback_kings)$/, 'big_plays'],
 ];
 export const categoryFamily = (id: string) => CATEGORY_FAMILIES.find(([re]) => re.test(id))?.[1] ?? id;
 
@@ -588,7 +595,54 @@ export const STORY_CATEGORY_IDS = new Set([
   'nfl_records_legends',
   'nfl_playoff_heroes',
   'nfl_monster_games',
+  'nfl_prime_time',
+  'nfl_highlight_reel',
+  'nfl_comeback_kings',
+  'nfl_division_champs',
+  'nfl_defense_wins',
+  'nfl_frozen_tundra',
 ]);
+
+// Columns that belong to a time of year: from [month, day] to [month, day], and which columns.
+// In its window a column is dealt first (up to two a board), so Thanksgiving week gets Turkey
+// Day and Super Bowl week gets a Super Bowl column. The rest of the year it takes its chances.
+const IN_SEASON: [[number, number], [number, number], RegExp][] = [
+  [[10, 20], [11, 8], /^nfl_blockbuster_trades$/], // the trade deadline
+  [[11, 15], [11, 30], /^nfl_thanksgiving$/],
+  [[12, 1], [1, 31], /^nfl_frozen_tundra$/],
+  [[12, 15], [1, 12], /^nfl_division_champs$/], // the division races
+  [[1, 5], [2, 15], /^nfl_(conference_title|playoff_heroes)$/], // the playoffs
+  [[1, 25], [2, 15], /^nfl_super_bowl/], // Super Bowl week (and the two before it)
+  [[1, 5], [2, 10], /^nfl_(coaching_carousel|head_coaches)$/], // hiring season
+  [[2, 20], [3, 8], /^nfl_combine$/],
+  [[3, 5], [3, 31], /^nfl_(show_me_the_money|suitcase_club|blockbuster_trades)$/], // free agency
+  [[4, 10], [5, 5], /^nfl_(drafted_by_|draft_steals$|mr_irrelevant$|number_one_picks$|rookie_report$|common_thread$)/], // the draft
+  [[8, 10], [9, 10], /^nfl_fantasy_studs$/], // fantasy draft season
+];
+
+/** How many days this column's current window runs (Infinity when it isn't in season), so the most date-specific column wins a board slot. */
+function seasonWindowDays(id: string, date: Date): number {
+  const md = (date.getMonth() + 1) * 100 + date.getDate();
+  const dayOfYear = (m: number, d: number) => (Date.UTC(2001, m - 1, d) - Date.UTC(2001, 0, 1)) / 86400000;
+  let best = Infinity;
+  for (const [from, to, ids] of IN_SEASON) {
+    const a = from[0] * 100 + from[1], b = to[0] * 100 + to[1];
+    if (!ids.test(id) || !(a <= b ? md >= a && md <= b : md >= a || md <= b)) continue;
+    best = Math.min(best, (dayOfYear(to[0], to[1]) - dayOfYear(from[0], from[1]) + 365) % 365);
+  }
+  return best;
+}
+
+/** True when this column is in season on this date (today when not given). */
+export function isInSeason(id: string, date = new Date()): boolean {
+  return seasonWindowDays(id, date) !== Infinity;
+}
+
+// Tests deal boards as of a chosen date.
+let dealDate: Date | null = null;
+export function setDealDate(date: Date | null): void {
+  dealDate = date;
+}
 
 export function getTotalCategoryCount(): number {
   return getActiveCategories().length;
@@ -611,6 +665,11 @@ const useHistory = () => !gameRandomSource;
 /** True if this group saw the question recently (within HOLD_BACK_DAYS) and it should wait its turn. */
 export function isRecentlySeen(id: string): boolean {
   return useHistory() && isHeldBack(id);
+}
+
+/** True if the group was asked about someone in this clue in the last few weeks (PEOPLE_HOLD_BACK_DAYS). */
+export function isAboutRecentPerson(q: QuestionClue): boolean {
+  return useHistory() && (q.people ?? []).some((p) => isPersonHeldBack(p));
 }
 
 /** Questions freshest first (never seen, then seen longest ago). With an episode code, the order given. */
@@ -637,9 +696,23 @@ export function dealWith<T>(random: (() => number) | null, deal: () => T): T {
   }
 }
 
-/** Records that the group was just shown these questions (on this device). */
+/** Records that the group was just shown these questions (on this device), and who they were about. */
 export function markQuestionsSeen(ids: string[]): void {
   markShown(ids);
+  const wanted = new Set(ids);
+  const people = new Set<string>();
+  for (const cat of getActiveCategories()) for (const q of cat.clues) if (wanted.has(q.id)) for (const p of q.people ?? []) people.add(p);
+  if (people.size) markPeopleShown([...people]);
+}
+
+/** Records who a shown clue was about, on a device that only has the clue itself (a phone, after the reveal). */
+export function markCluePeopleSeen(q: QuestionClue): void {
+  if (q.people?.length) markPeopleShown(q.people);
+}
+
+/** Remembers this game's columns on this device, so the next game it hosts deals different ones. */
+export function rememberGameColumns(ids: string[]): void {
+  rememberColumns(ids);
 }
 
 export function resetSeenQuestions(): void {
@@ -734,10 +807,28 @@ export function generateBoardForRound(
     ...fisherYatesShuffle(availableCats.filter((c) => freshCount(c) >= ladderSize)),
     ...fisherYatesShuffle(availableCats.filter((c) => freshCount(c) < ladderSize)),
   ];
+  // The last game's columns go to the back of the line, so two games in a row don't feel alike.
+  // (Not with an episode code: that has to deal the same board on every device, on any day.)
+  if (useHistory()) {
+    const lastGame = lastGameColumns();
+    order.sort((a, b) => Number(lastGame.has(a.id)) - Number(lastGame.has(b.id)));
+  }
   // The featured category (this week's games) is tried first so it makes the board even
-  // when the group has seen it all, then a story column, then the rest.
+  // when the group has seen it all, then up to two columns that are in season, then a story
+  // column, then the rest.
   const story = order.find((c) => STORY_CATEGORY_IDS.has(c.id) && c.id !== featuredCategoryId);
   if (story) order.unshift(...order.splice(order.indexOf(story), 1));
+  if (useHistory()) {
+    const when = dealDate ?? new Date();
+    const seasonal: TriviaCategory[] = [];
+    // Shortest window first: Super Bowl week's Super Bowl column beats the playoffs-long ones.
+    const byWindow = order.filter((c) => isInSeason(c.id, when)).sort((a, b) => seasonWindowDays(a.id, when) - seasonWindowDays(b.id, when));
+    for (const c of byWindow) {
+      if (seasonal.length >= 2) break;
+      if (c.id !== featuredCategoryId && isInSeason(c.id, when) && freshCount(c) >= ladderSize && !seasonal.some((x) => categoryFamily(x.id) === categoryFamily(c.id))) seasonal.push(c);
+    }
+    for (const c of seasonal.reverse()) order.unshift(...order.splice(order.indexOf(c), 1));
+  }
   const featuredIdx = order.findIndex((c) => c.id === featuredCategoryId);
   if (featuredIdx > 0) order.unshift(...order.splice(featuredIdx, 1));
 
@@ -756,6 +847,8 @@ export function generateBoardForRound(
       fisherYatesShuffle(cat.clues.filter((q) => !usedQuestionIds.has(q.id) && !clueOverlaps(q, usedAnswers) && !flagged.has(q.id)))
     );
     const fresh = (q: QuestionClue) => !isRecentlySeen(q.id);
+    // Fresh, and not about anyone the group was asked about in the last few weeks.
+    const clear = (q: QuestionClue) => fresh(q) && !isAboutRecentPerson(q);
 
     // Build the ladder (difficulty 1 to 5, or 1/3/5 for a short game).
     const ladderClues: QuestionClue[] = [];
@@ -763,9 +856,12 @@ export function generateBoardForRound(
     for (let ladderIdx = 0; ladderIdx < ladderSize; ladderIdx++) {
       const targetDiff = layout.difficulties[ladderIdx];
       const isFree = (q: QuestionClue) => !ladderClues.some((c) => c.id === q.id) && !clueOverlaps(q, localUsed);
-      // Prefer a fresh exact difficulty match, then a fresh clue one level off, then any fresh
-      // clue, then a recently seen one at the right level, then anything left (the board must fill).
+      // Prefer a fresh exact difficulty match about new people, then one a level off, then the
+      // same with people the group met lately, then any fresh clue, then a recently seen one at
+      // the right level, then anything left (the board must fill).
       const candidate =
+        eligibleClues.find((q) => clear(q) && q.difficulty === targetDiff && isFree(q)) ||
+        eligibleClues.find((q) => clear(q) && Math.abs(q.difficulty - targetDiff) === 1 && isFree(q)) ||
         eligibleClues.find((q) => fresh(q) && q.difficulty === targetDiff && isFree(q)) ||
         eligibleClues.find((q) => fresh(q) && Math.abs(q.difficulty - targetDiff) === 1 && isFree(q)) ||
         eligibleClues.find((q) => fresh(q) && isFree(q)) ||
@@ -812,6 +908,9 @@ export const FINAL_CATEGORY_IDS = new Set([
   'nfl_franchises_stadiums',
   'nfl_playoff_heroes',
   'nfl_monster_games',
+  'nfl_comeback_kings',
+  'nfl_division_champs',
+  'nfl_defense_wins',
 ]);
 
 export function getChampionshipFinalClues(): QuestionClue[] {

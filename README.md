@@ -32,12 +32,29 @@ Daily Double) to play a short game while testing.
 
 ## Questions
 
-`public/questions/nfl.json` holds about 4,000 NFL questions, written as Jeopardy-style clues, generated from
-[nflverse](https://github.com/nflverse) data (CC BY 4.0). Rebuild it with:
+`public/questions/nfl.json` holds about 6,800 NFL questions in about 40 columns, written as
+Jeopardy-style clues, generated from [nflverse](https://github.com/nflverse) data (CC BY 4.0).
+Rebuild it with:
 
 ```sh
-npm run questions
+npm run questions                 # downloads the data it needs
+npm run questions -- --offline    # reuses what .cache/nflverse already holds
+npm run questions -- --history    # also rebuilds scripts/data/history.json (see below)
 ```
+
+- **Cheap tiles are easy.** Each player and coach gets a fame score (career value, Pro Bowls,
+  starts, seasons coached), a clue about a star ranks easier than one about a role player, and
+  each column is graded on a curve: its easiest fifth are the $200 tiles, its hardest fifth the $1,000 tiles.
+- **Mixed wording.** A clue picks one of a few phrasings from its id, so a column doesn't read like
+  a form letter, and the same clue reads the same on every rebuild.
+- **Big plays from history.** `scripts/data/history.json` holds each finished season's longest
+  touchdowns and returns, Hail Marys, last-second winners and biggest comebacks, boiled down from
+  play-by-play (Highlight Reel, Comeback Kings). Finished seasons never change, so the weekly
+  build only reads play-by-play for a season the file doesn't have yet.
+- **Fantasy.** Fantasy Studs comes from each season's fantasy points. Waiver Wire is the week's
+  most-added players from Sleeper's public trending list; if Sleeper can't be reached the column
+  is left out until the next build.
+- **Show Me the Money** uses nflverse's contract history (from Over the Cap).
 
 The **Refresh NFL questions** GitHub Action does this every Tuesday, which keeps the
 "this week" and "this season" categories current. Every game has one current column on
@@ -49,6 +66,15 @@ the group's history back, so whichever device hosts next knows what the group ha
 Questions the group saw in the last 90 days are held back; when a category runs low, the ones
 seen longest ago come back first, so boards always fill. Tiles nobody opened don't count.
 Episode codes ignore history so every listener gets the same boards.
+
+**Variety from game to game** (`npm run test:variety`):
+- People wait too. Whoever a shown clue was about is held back for 3 weeks, while a clue about
+  someone else fits, so the same star doesn't come up every game.
+- The last game's columns sit the next game out (on the device that hosted it).
+- Columns follow the calendar. In its window a column is dealt first, up to two a board: Turkey
+  Day in Thanksgiving week, playoff and Super Bowl columns in January and early February, the
+  combine in late February, contracts and trades in free agency, draft columns in late April,
+  Fantasy Studs before the season. The list is `IN_SEASON` in triviaEngine.ts.
 `npm run test:history` checks the rules and `npm run test:group-history` checks the phone hand-off
 in a browser (it needs `npm i --no-save peer@1`).
 `npm run simulate` plays 40 simulated games and reports how often questions repeat.

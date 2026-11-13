@@ -18,8 +18,9 @@ export const seatLabel = (seat: ContestantId) => (seat === 'analyst' ? 'P3' : se
 
 // Typed and mic-only modes show no options and check the answer with fuzzy matching.
 export const isOpenAnswerMode = (mode: AnswerMode) => mode === 'EXPERT' || mode === 'VOICE';
-// What a phone gets of a question before the reveal: the clue without its answer.
-export const hideAnswer = (clue: QuestionClue): QuestionClue => ({...clue, correctAnswer: '', aliases: [], distractors: []});
+// What a phone gets of a question before the reveal: the clue without its answer, or the
+// names of who it is about (which would give the answer away).
+export const hideAnswer = (clue: QuestionClue): QuestionClue => ({...clue, correctAnswer: '', aliases: [], distractors: [], subjects: undefined, people: undefined});
 
 export interface Contestant {
   id: ContestantId;
