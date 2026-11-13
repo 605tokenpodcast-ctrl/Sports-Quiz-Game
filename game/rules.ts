@@ -88,8 +88,8 @@ export function aiSettings(difficulty: AIDifficulty): AISettings {
 
 /** Categories each AI is especially good at: Coach Dave knows coaches, big games and teams; Stats Riley knows numbers and players. */
 const AI_SPECIALTIES: Record<'coach' | 'analyst', RegExp> = {
-  coach: /^nfl_(super_bowl|conference_title|head_coaches|stadiums|records$|franchises|blockbuster_trades)/,
-  analyst: /^nfl_(passing|rushing|receiving)_leaders|^nfl_(this_season|this_week|combine|stars_now|records_legends|playoff_qbs|who_am_i)/,
+  coach: /^nfl_(super_bowl|conference_title|head_coaches|coaching_carousel|division_champs|comeback_kings|frozen_tundra|stadiums|records$|franchises|blockbuster_trades)/,
+  analyst: /^nfl_(passing|rushing|receiving)_leaders|^nfl_(this_season|this_week|combine|stars_now|records_legends|playoff_qbs|who_am_i|fantasy_studs|waiver_wire|rookie_report|defense_wins|show_me_the_money)/,
 };
 
 /**
