@@ -94,7 +94,8 @@ try {
       seen.add('final revealed');
       continue;
     }
-    if (hostBody.includes('nobody can play the Final Showdown')) seen.add('nobody plays the final');
+    // Looked up fresh: the page can reach this screen after the text above was read.
+    if (hostBody.includes('nobody can play the Final Showdown') || (await visible(host, 'text=nobody can play the Final Showdown'))) seen.add('nobody plays the final');
     if (await tap(host, 'button:has-text("SEE FINAL RESULTS")')) continue;
     let acted = false;
     // Phones take turns acting, so different players buzz in.

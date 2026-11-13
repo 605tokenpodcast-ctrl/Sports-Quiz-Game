@@ -36,6 +36,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/questions/nfl.json
+          # history.json only changes when a season ends: its best plays and comebacks are added once.
+          git add public/questions/nfl.json scripts/data/history.json
           git diff --cached --quiet || git commit -m "Refresh NFL questions"
           git push

@@ -6,6 +6,10 @@
 //
 // Dealing prefers, in order: questions never seen, then ones seen more than HOLD_BACK_DAYS ago
 // (oldest first), and only then questions seen recently (oldest first), so a board always fills.
+//
+// The people a question was about are remembered the same way, for PEOPLE_HOLD_BACK_DAYS, so a
+// player who came up last week waits a few weeks before the group gets another clue about him.
+// And each device remembers the columns of the last game it hosted, so the next one deals others.
 
 const STORAGE_KEY = 'sports_arena_question_history_v1';
 // The old per-device list (no dates). Read once and folded in as seen today.
@@ -16,6 +20,13 @@ const OLD_COUNT_KEY = 'sports_arena_seen_count_v20';
 export const HOLD_BACK_DAYS = 90;
 /** History older than this is forgotten. */
 const KEEP_DAYS = 365;
+/** A person the group was asked about within this many days is held back while a clue about someone else fits. */
+export const PEOPLE_HOLD_BACK_DAYS = 21;
+/** People are kept in the same history as questions, under this prefix ("p:tombrady"). */
+const PERSON = 'p:';
+const LAST_COLUMNS_KEY = 'sports_arena_last_columns_v1';
+/** The last game's columns stop mattering after this many days. */
+const LAST_COLUMNS_DAYS = 30;
 
 /** Day number (days since 1970, local time) a question was last shown, by question id. */
 const lastShown = new Map<string, number>();
@@ -105,10 +116,37 @@ export function exportHistory(): SharedHistory {
   const now = today();
   const out: SharedHistory = {};
   for (const [id, day] of lastShown) {
-    if (now - day > KEEP_DAYS) continue;
+    if (now - day > (id.startsWith(PERSON) ? PEOPLE_HOLD_BACK_DAYS : KEEP_DAYS)) continue;
     (out[day] ||= []).push(id);
   }
   return out;
+}
+
+/** Records that the group was just asked about these people (normalized names). */
+export function markPeopleShown(names: string[], now = Date.now()): void {
+  markShown(names.map((n) => PERSON + n), now);
+}
+
+/** True if the group was asked about this person within PEOPLE_HOLD_BACK_DAYS. */
+export function isPersonHeldBack(name: string, now = today()): boolean {
+  const day = lastShownDay(PERSON + name);
+  return day !== undefined && now - day < PEOPLE_HOLD_BACK_DAYS;
+}
+
+/** Remembers the columns of the game being played on this device. */
+export function rememberColumns(ids: string[]): void {
+  try {
+    storage()?.setItem(LAST_COLUMNS_KEY, JSON.stringify({day: today(), ids}));
+  } catch {}
+}
+
+/** The columns of the last game played on this device (empty when that was long ago). */
+export function lastGameColumns(): Set<string> {
+  try {
+    const saved = JSON.parse(storage()?.getItem(LAST_COLUMNS_KEY) ?? 'null');
+    if (saved && Array.isArray(saved.ids) && today() - Number(saved.day) <= LAST_COLUMNS_DAYS) return new Set(saved.ids.filter((id: unknown) => typeof id === 'string'));
+  } catch {}
+  return new Set();
 }
 
 /** Adds another device's history to this one's and saves it. Returns how many questions it added or moved forward. */
@@ -136,7 +174,7 @@ export function shownCount(): number {
   hydrate();
   const now = today();
   let n = 0;
-  for (const day of lastShown.values()) if (now - day <= KEEP_DAYS) n++;
+  for (const [id, day] of lastShown) if (!id.startsWith(PERSON) && now - day <= KEEP_DAYS) n++;
   return n;
 }
 
@@ -145,7 +183,7 @@ export function heldBackCount(): number {
   hydrate();
   const now = today();
   let n = 0;
-  for (const day of lastShown.values()) if (now - day < HOLD_BACK_DAYS) n++;
+  for (const [id, day] of lastShown) if (!id.startsWith(PERSON) && now - day < HOLD_BACK_DAYS) n++;
   return n;
 }
 
@@ -155,6 +193,7 @@ export function resetHistory(): void {
   const ls = storage();
   try {
     ls?.removeItem(STORAGE_KEY);
+    ls?.removeItem(LAST_COLUMNS_KEY);
     ls?.removeItem(OLD_SEEN_KEY);
     ls?.removeItem(OLD_COUNT_KEY);
   } catch {}

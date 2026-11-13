@@ -23,6 +23,22 @@ for (const c of cats) {
   }
 }
 
+// A player can't beat or lose to his own team ("this Rams quarterback ... in a 49-37 loss to the Rams"):
+// that means a moved team's old home game was read as a road game.
+for (const c of cats) {
+  for (const e of c.entries) {
+    const m = e.clue.match(/[Tt]his ([A-Z0-9][\w]+) [a-z ]+? .*?(?:win over|loss to|tie with|beat|against) the ([A-Z0-9][\w]+)/);
+    if (m && m[1] === m[2]) fail(`${c.title}: a team playing itself: ${e.clue}`);
+  }
+}
+
+// The live season column keeps a question's id while its answer is unchanged, so no id carries a week number.
+// (Checked by shape: at most a few win-total questions, which are guessing games.)
+const numberAnswers = (byId.get('nfl_records')?.entries ?? []).filter((e) => /^\d+$/.test(e.answer)).length;
+if (numberAnswers > 25) fail(`Feast or Famine has ${numberAnswers} win-total questions`);
+const roundAnswers = (byId.get('nfl_draft_steals')?.entries ?? []).filter((e) => /^Round \d+$/.test(e.answer)).length;
+if (roundAnswers > 60) fail(`Draft Steals has ${roundAnswers} "which round" questions`);
+
 // One stadium answer per team.
 const stadiumOf = new Map<string, string>();
 for (const e of byId.get('nfl_stadiums')?.entries ?? []) {

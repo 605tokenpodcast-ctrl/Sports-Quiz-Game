@@ -5,6 +5,7 @@ import {AIDifficulty, AnswerMode, RemoteSeat, seatLabel} from '../game/types';
 import {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {isSpeechSupported} from '../utils/speech';
 import {useGame} from '../game/GameContext';
+import {savedGameSummary} from '../utils/savedGame';
 import VoiceSettings from './VoiceSettings';
 import FlaggedQuestions from './FlaggedQuestions';
 
@@ -47,6 +48,9 @@ export default function StartMenu() {
     screenCount,
     hostPlays,
     setHostPlays,
+    savedGame,
+    resumeSavedGame,
+    discardSavedGame,
   } = useGame();
   const seatedPhones = Object.keys(remoteSeats).length;
   // With the host not playing, P1 and P2 need phones before the game can start (Stats Riley can be P3).
@@ -74,6 +78,39 @@ export default function StartMenu() {
                 'Loading the NFL question bank...'
               )}
             </p>
+
+            {/* A game this device was hosting: pick it back up after a reload or a quit. */}
+            {savedGame && (
+              <div className="w-full mb-3 p-3 rounded-xl border-2 border-emerald-500 bg-emerald-950/70 text-left">
+                <div className="text-xs font-black text-emerald-300 uppercase">Game in progress</div>
+                <div className="text-[11px] text-slate-200 mt-0.5">
+                  {savedGameSummary(savedGame)}.{' '}
+                  {(savedGame.isTwoPlayerMode || savedGame.isClientConnected ? (['player', 'player2', 'analyst'] as const) : (['player', 'coach', 'analyst'] as const))
+                    .map((id) => `${savedGame.contestants[id].name} $${savedGame.contestants[id].score.toLocaleString()}`)
+                    .join(', ')}
+                  .
+                </div>
+                {Object.keys(savedGame.phoneSeats).length > 0 && (
+                  <div className="text-[11px] text-emerald-200 mt-0.5">
+                    Phones back: {seatedPhones} of {Object.keys(savedGame.phoneSeats).length}. They rejoin by themselves, or by scanning the code again.
+                  </div>
+                )}
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={resumeSavedGame}
+                    className="flex-1 min-h-[44px] rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm">
+                    RESUME GAME
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm('Throw away the game in progress?')) discardSavedGame();
+                    }}
+                    className="min-h-[44px] px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs">
+                    Discard
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Contestant Name Bar with fully interactive Edit Tag Modal */}
             <div className="w-full mb-3 bg-slate-950/90 p-2.5 rounded-xl border border-blue-900 flex items-center justify-between text-left shadow-inner">

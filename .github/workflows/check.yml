@@ -1,7 +1,8 @@
 name: Check pull request
 
-# Type checks, runs the tests and builds the game on every pull request,
-# so problems show up before anything is merged and published.
+# Type checks, runs the tests and builds the game on every pull request, and plays whole
+# games in a real browser (host, phones and stream screen), so problems show up before
+# anything is merged and published.
 on:
   pull_request:
 
@@ -19,3 +20,19 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  # Plays the game in a headless browser: a full game, a game hosted from a laptop with three
+  # phones, a phone dropping and coming back, the host reloading, and the phone layouts.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      # The browser tests need a browser and a local PeerJS server, which the game itself doesn't.
+      - run: npm i --no-save peer@1 playwright@1
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser

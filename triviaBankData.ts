@@ -69,7 +69,8 @@ import {
 
 export const BUILT_IN_NFL_SPECS: CategorySpecData[] = [
   assembleCategory(
-    'nfl_super_bowl',
+    // Its own id: the weekly bank's Super Bowl Sunday column is nfl_super_bowl.
+    'nfl_super_bowl_mvps',
     'Super Bowl Champions & MVPs',
     'NFL',
     'Championship performances, game-winning drives, and Super Bowl MVP honors.',

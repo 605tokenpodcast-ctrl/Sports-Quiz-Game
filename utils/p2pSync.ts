@@ -22,6 +22,9 @@ export type P2PMessage =
   | { type: 'CLIENT_FINAL_WAGER'; contestantId: string; wager: number; lockIn?: boolean }
   | { type: 'CLIENT_FINAL_ANSWER'; contestantId: string; answer: string; lockIn?: boolean }
   | { type: 'ROOM_FULL' }
+  // The game is on and the room is locked: the host has been asked to let this phone in.
+  | { type: 'JOIN_WAITING' }
+  | { type: 'JOIN_DENIED' }
   | { type: 'PING'; time: number }
   | { type: 'PONG'; time: number };
 
@@ -114,6 +117,9 @@ export class P2PConnectionManager {
   // When each peer was last heard from. A phone that locks its screen can vanish without
   // closing its connection, so the host drops peers that go quiet.
   private lastHeard = new Map<string, number>();
+  // Host: phones waiting for the host's OK. They get heartbeats and direct messages, not the game.
+  private held = new Set<string>();
+  private reopenTries = 0;
   // Phone only: reconnecting to the host after losing it.
   private hasJoined = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -147,8 +153,11 @@ export class P2PConnectionManager {
     role: 'host' | 'client',
     callbacks: P2PCallbacks,
     playerName = 'Friend',
-    joinAs: 'player' | 'screen' = 'player'
+    joinAs: 'player' | 'screen' = 'player',
+    reopening = false
   ) {
+    // A host reopening its room after a reload may find the broker still holding the old id for a moment.
+    this.reopenTries = reopening ? 20 : 0;
     this.roomCode = roomCode.toUpperCase().trim();
     this.isHost = role === 'host';
     this.callbacks = callbacks;
@@ -212,6 +221,17 @@ export class P2PConnectionManager {
       console.warn('[PeerJS] Error:', err);
       // A phone that was already in the game keeps trying: the host may be reloading or offline for a moment.
       if (!this.isHost && this.hasJoined && this.scheduleReconnect()) return;
+      if (err.type === 'unavailable-id' && this.isHost && this.reopenTries > 0 && !this.isDestroyed) {
+        this.reopenTries--;
+        this.callbacks.onStatus('connecting', 'Reopening the room...');
+        if (this.pingInterval) clearInterval(this.pingInterval);
+        this.peer?.destroy();
+        this.peer = null;
+        setTimeout(() => {
+          if (!this.isDestroyed) this.initPeer();
+        }, 3000);
+        return;
+      }
       if (err.type === 'unavailable-id' && this.isHost) {
         this.callbacks.onStatus('error', 'That room code is already in use. Pick a new room code.');
       } else if (err.type === 'peer-unavailable') {
@@ -353,6 +373,7 @@ export class P2PConnectionManager {
     this.connections.delete(conn.peer);
     this.roundTrips.delete(conn.peer);
     this.lastHeard.delete(conn.peer);
+    this.held.delete(conn.peer);
     if (this.isHost) {
       this.callbacks.onPeerLeft?.(conn.peer);
       if (this.connections.size === 0) this.callbacks.onStatus('disconnected', 'All friends disconnected');
@@ -379,6 +400,7 @@ export class P2PConnectionManager {
   public send(msg: P2PMessage, toPeerId?: string) {
     for (const [peerId, conn] of this.connections) {
       if (toPeerId && peerId !== toPeerId) continue;
+      if (!toPeerId && msg.type !== 'PING' && this.held.has(peerId)) continue;
       if (!conn.open) continue;
       try {
         conn.send(msg);
@@ -388,6 +410,15 @@ export class P2PConnectionManager {
     }
   }
 
+  /** Host: keep a phone connected but out of the game until the host lets it in. */
+  public hold(peerId: string) {
+    this.held.add(peerId);
+  }
+
+  public release(peerId: string) {
+    this.held.delete(peerId);
+  }
+
   /** Host: drop one friend's connection (used to turn away a 4th phone). */
   public disconnectPeer(peerId: string) {
     const conn = this.connections.get(peerId);
@@ -395,6 +426,7 @@ export class P2PConnectionManager {
     this.connections.delete(peerId);
     this.roundTrips.delete(peerId);
     this.lastHeard.delete(peerId);
+    this.held.delete(peerId);
     // Give the ROOM_FULL message a moment to arrive before closing.
     setTimeout(() => conn.close(), 500);
   }

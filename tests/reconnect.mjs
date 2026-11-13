@@ -76,6 +76,29 @@ try {
   await phones[0].waitForSelector('text=Synced with Host', {timeout: 20000});
   await host.waitForTimeout(800);
   check((await hostNames()) === namesBefore, 'a reloaded phone keeps its name');
+
+  // The room locked when the game started: a phone the host hasn't seen has to be let in.
+  const late = await open(`${base}?room=${room}&role=join`, {width: 390, height: 844});
+  await late.waitForSelector('text=ASKING THE HOST', {timeout: 15000}).then(
+    () => check(true, 'a new phone waits for the host once the game is on'),
+    () => check(false, 'a new phone waits for the host once the game is on')
+  );
+  check(!(await late.locator('text=YOUR BANK').isVisible()) || (await late.locator('text=ASKING THE HOST').isVisible()), 'the waiting phone is not in the game');
+  await host.waitForSelector('text=wants to join', {timeout: 5000});
+  check((await hostNames()) === namesBefore, 'the waiting phone took no seat');
+  await host.click('text=Turn away');
+  await late.waitForSelector('text=COULD NOT JOIN', {timeout: 8000}).then(
+    () => check(true, 'a phone the host turns away is told so'),
+    () => check(false, 'a phone the host turns away is told so')
+  );
+  const friend = await open(`${base}?room=${room}&role=join`, {width: 390, height: 844});
+  await host.waitForSelector('text=wants to join', {timeout: 15000});
+  await host.click('text=Let in');
+  await friend.waitForSelector('text=P3 ARENA CONTROLLER', {timeout: 8000}).then(
+    () => check(true, 'a phone the host lets in takes the open seat'),
+    () => check(false, 'a phone the host lets in takes the open seat')
+  );
+  check(!(await host.locator('text=wants to join').isVisible()), 'the join request is gone from the host');
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);
 } catch (e) {
   console.log(`FAIL ${e.message}`);

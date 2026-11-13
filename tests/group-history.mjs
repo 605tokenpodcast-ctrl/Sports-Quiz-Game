@@ -52,8 +52,9 @@ try {
   // Host plays P1: open the first tile and check both devices remember that clue.
   await host.locator('button:has-text("$")').first().click({timeout: 20000});
   await host.waitForTimeout(1500);
-  const shownHost = (await ids(host)).filter((id) => !['host_only_q', 'phone_q1', 'phone_q2'].includes(id));
-  const shownPhone = (await ids(phone)).filter((id) => !['host_only_q', 'phone_q1', 'phone_q2'].includes(id));
+  // People the clue was about are kept in the same history as "p:name"; only questions count here.
+  const shownHost = (await ids(host)).filter((id) => !['host_only_q', 'phone_q1', 'phone_q2'].includes(id) && !id.startsWith('p:'));
+  const shownPhone = (await ids(phone)).filter((id) => !['host_only_q', 'phone_q1', 'phone_q2'].includes(id) && !id.startsWith('p:'));
   check(shownHost.length === 1, `the host remembers the clue it showed (${shownHost.join(', ')})`);
   check(shownPhone.length === 1 && shownPhone[0] === shownHost[0], `the phone remembers the same clue (${shownPhone.join(', ')})`);
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`);

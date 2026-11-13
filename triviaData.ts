@@ -17,6 +17,7 @@ import {
   markClueUsed,
   getSeenQuestionsCount,
   isRecentlySeen,
+  isAboutRecentPerson,
   freshFirst,
   getHeldBackCount,
   markQuestionsSeen,
@@ -252,6 +253,9 @@ export function getFreshFinalShowdownClue(
 
   // The hand-written Finals are the best ones, so they come up about a third of the time
   // while the group still has some it hasn't seen recently.
+  // A Final about someone the group met in the last few weeks waits, while another one fits.
+  const aboutNewPeople = candidates.filter((q) => !isAboutRecentPerson(q));
+  if (aboutNewPeople.length > 0) candidates.splice(0, candidates.length, ...aboutNewPeople);
   const handWritten = candidates.filter((q) => q.id.startsWith('final_'));
   const pool =
     handWritten.length > 0 && gameRandom() < 0.35

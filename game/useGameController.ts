@@ -14,6 +14,8 @@ import {
   getSeenQuestionsCount,
   getHeldBackCount,
   markQuestionsSeen,
+  markCluePeopleSeen,
+  rememberGameColumns,
   getTotalAvailableQuestionCount,
   getTotalCategoryCount,
   loadExternalQuestionBank,
@@ -26,6 +28,7 @@ import {useWakeLock} from '../utils/wakeLock';
 import {newEpisodeCode, normalizeEpisodeCode, episodeLength, seededRandom} from '../utils/episode';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
 import {exportHistory, mergeHistory} from '../utils/questionHistory';
+import {clearSavedGame, loadSavedGame, saveGame, type SavedGame} from '../utils/savedGame';
 import {
   answerLine,
   streakLine,
@@ -92,7 +95,7 @@ import {
   aiCorrectChance,
   aiBuzzChance,
   updateStreaks,
-  HINT_SECONDS,
+  hintGaps,
   aiWhoAmIWaitMs,
   hintCount,
   shownClueText,
@@ -140,6 +143,23 @@ const spokenFinal = (clue: QuestionClue): SpeechPart[] => [
 ];
 const partsText = (parts: SpeechPart[]) => parts.map((p) => (typeof p === 'string' ? p : p.text)).join(' ');
 
+// The game this device was hosting before a reload, looked up once. A link for a different
+// room, or a phone or stream screen link, starts clean.
+let foundSavedGame: SavedGame | null | undefined;
+function savedGameAtLoad(): SavedGame | null {
+  if (foundSavedGame !== undefined) return foundSavedGame;
+  foundSavedGame = null;
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  if (params.get('role') || hashParams.get('role')) return null;
+  const saved = loadSavedGame();
+  const room = params.get('room') || hashParams.get('room');
+  if (saved && room && room.toUpperCase().trim() !== saved.roomCode) return null;
+  foundSavedGame = saved;
+  return saved;
+}
+
 export function useGameController() {
   // Audio mute controls: Music MUST be OFF by default, SFX MUST be ON by default
   const [sfxMuted, setSfxMuted] = useState(false);
@@ -161,6 +181,9 @@ export function useGameController() {
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const codeParam = params.get('room') || hashParams.get('room');
     if (codeParam) return codeParam.toUpperCase().trim();
+    // Reopen the room a reloaded host was running, so its phones find it again.
+    const saved = savedGameAtLoad();
+    if (saved) return saved.roomCode;
     return `SPORT-${Math.floor(1000 + Math.random() * 9000)}`;
   });
 
@@ -259,6 +282,7 @@ export function useGameController() {
   });
   const hostPlaysRef = useRef(hostPlays);
   hostPlaysRef.current = hostPlays;
+  const readAloudRef = useRef(false);
   // Read each clue aloud. The buzzers wait until it has been read. The stream screen does the
   // reading when one is connected, otherwise the host device does.
   const [readAloud, setReadAloudState] = useState(() => {
@@ -268,6 +292,7 @@ export function useGameController() {
       return false;
     }
   });
+  readAloudRef.current = readAloud;
   const setReadAloud = useCallback((on: boolean) => {
     setReadAloudState(on);
     if (on) unlockSpeech();
@@ -427,6 +452,16 @@ export function useGameController() {
   useEffect(() => {
     if (shownClueId) markQuestionsSeen([shownClueId]);
   }, [shownClueId]);
+  // Who the clue was about is remembered too. A phone only learns that with the reveal.
+  const shownPeople = activeClue?.clue.people;
+  useEffect(() => {
+    if (activeClue && shownPeople?.length) markCluePeopleSeen(activeClue.clue);
+  }, [shownClueId, shownPeople?.join('|')]);
+  // Once a game is under way on the host, its columns are the ones the next game steers away from.
+  const gameUnderWay = deviceRole === 'HOST' && Boolean(shownClueId);
+  useEffect(() => {
+    if (gameUnderWay) rememberGameColumns([...round1Board, ...round2Board].map((c) => c.id));
+  }, [gameUnderWay, round1Board, round2Board]);
   const shownFinalId = currentRound === 'FINAL_SHOWDOWN' && finalShowdownPhase !== 'WAGER' ? finalClue?.id : undefined;
   useEffect(() => {
     if (shownFinalId) markQuestionsSeen([shownFinalId]);
@@ -499,10 +534,18 @@ export function useGameController() {
 
   // Host: seats whose phone dropped during a match, with that player's name, so they can rejoin
   // into the same seat and score. Stats Riley covers an away Player 3; an away Player 2 sits out.
-  const [awaySeats, setAwaySeats] = useState<Partial<Record<RemoteSeat, string>>>({});
+  // After a host reload, the phones that were playing are away until they reconnect.
+  const [awaySeats, setAwaySeats] = useState<Partial<Record<RemoteSeat, string>>>(() => savedGameAtLoad()?.phoneSeats ?? {});
   const awaySeatsRef = useRef(awaySeats);
   // Host: which phone (by its device id) last sat in each seat.
-  const seatDevicesRef = useRef<Partial<Record<RemoteSeat, string>>>({});
+  const seatDevicesRef = useRef<Partial<Record<RemoteSeat, string>>>(savedGameAtLoad()?.seatDevices ?? {});
+  // Host: the game in progress as last saved, offered on the start screen after a reload or a quit.
+  const [savedGame, setSavedGame] = useState<SavedGame | null>(() => savedGameAtLoad());
+  // Host: phones that asked to join after the game started, waiting for the host's OK.
+  const pendingJoinsRef = useRef<Record<string, Extract<P2PMessage, {type: 'CLIENT_JOIN'}>>>({});
+  const [pendingJoins, setPendingJoins] = useState<{peerId: string; name: string}[]>([]);
+  // Phone: the room is locked and the host has been asked to let this phone in.
+  const [joinWaiting, setJoinWaiting] = useState(false);
   const player2Away = awaySeats.player2 !== undefined;
   // Only a phone playing P1 (when the host doesn't play) can be away.
   const player1Away = awaySeats.player !== undefined;
@@ -940,6 +983,72 @@ export function useGameController() {
     setIsTagEditorOpen(false);
   }, [initializeBoards, isTwoPlayerMode, isClientConnected, playerName, player3Human, readAloud, hostPlays, bankStatus]);
 
+  /** Host: pick the saved game back up where the last clue ended. */
+  const resumeSavedGame = useCallback(() => {
+    const g = savedGame;
+    if (!g) return;
+    gameAudio.playConfirmSelect();
+    setRound1Board(g.round1Board);
+    setRound2Board(g.round2Board);
+    setAnsweredClueIds(new Set(g.answeredClueIds));
+    setFinalClue(g.finalClue);
+    setCurrentRound(g.currentRound);
+    setActiveSelector(g.activeSelector);
+    setAiPickingTile(null);
+    setAiThinkingStatus(null);
+    setHighScoreCelebration(null);
+    setDifficulty(g.difficulty);
+    setAnswerMode(g.answerMode);
+    setGameLengthState(g.gameLength);
+    setEpisodeCodeState(g.episodeCode);
+    setIsTwoPlayerMode(g.isTwoPlayerMode);
+    setIsClientConnected(g.isClientConnected);
+    setMatchStats((prev) => ({...prev, ...g.matchStats}));
+    setBigPlay(g.bigPlay);
+    if (readAloud) unlockSpeech();
+    const away = awaySeatsRef.current;
+    const next = {...g.contestants};
+    for (const id of Object.keys(next) as ContestantId[]) next[id] = {...next[id], reaction: 'idle', wager: 0};
+    // Stats Riley covers a Player 3 whose phone isn't back yet, as when a phone drops mid-game.
+    if (away.analyst !== undefined) next.analyst = {...next.analyst, name: 'Stats Riley', shortName: 'Riley', title: 'Analytics Guru'};
+    setContestants(next);
+    commitClue(null);
+    // A Final in progress starts over at the wagers.
+    const sitters = g.currentRound === 'FINAL_SHOWDOWN' ? (Object.keys(next) as ContestantId[]).filter((id) => next[id].sitsOutFinal) : [];
+    const locked = Object.fromEntries(sitters.map((id) => [id, true]));
+    setFinalLocks({wager: {...locked}, answer: {...locked}});
+    setFinalShowdownPhase('WAGER');
+    setFinalTimer(frozenCountdown(TIMES.final));
+    setFinalPlayerInput('');
+    setFinalPlayer2Input('');
+    setFinalPlayer3Input('');
+    setPlayerFinalWager(maxFinalWager(next.player.score));
+    setPlayer2FinalWager(maxFinalWager(next.player2.score));
+    setPlayer3FinalWager(maxFinalWager(next.analyst.score));
+    setFinalOptions(g.currentRound === 'FINAL_SHOWDOWN' && g.finalClue ? generateOptions(g.finalClue, g.answerMode) : []);
+    introducedRoundsRef.current = new Set(g.introducedRounds);
+    setCategoryIntro(null);
+    pendingFinalRef.current = null;
+    setFinalReveal(null);
+    setGameState((prev) => ({...prev, status: 'PLAYING', score: next.player.score}));
+    setIsGameMenuOpen(false);
+    setIsHowToPlayOpen(false);
+    setIsInviteModalOpen(false);
+    setIsLeaderboardOpen(false);
+    setIsTagEditorOpen(false);
+    showToast('Game restored. Phones rejoin with the same room code.');
+  }, [savedGame, readAloud, generateOptions, showToast]);
+
+  /** Host: forget the saved game. Seats held for phones that haven't come back are freed. */
+  const discardSavedGame = useCallback(() => {
+    clearSavedGame();
+    setSavedGame(null);
+    if (gameStatusRef.current !== 'PLAYING') {
+      awaySeatsRef.current = {};
+      setAwaySeats({});
+    }
+  }, []);
+
   // Buzzer races. With friends on phones, buzzes are collected for a moment and the earliest
   // press wins, counting each phone's network delay, so the host's own phone has no head start.
   const BUZZ_WINDOW_MS = 250;
@@ -1109,7 +1218,7 @@ export function useGameController() {
 
   // P2P Message Dispatcher for Host & Client
   const handleP2PMessage = useCallback(
-    (msg: P2PMessage, fromPeerId: string) => {
+    (msg: P2PMessage, fromPeerId: string, admitted = false) => {
       // 1. Host receives events from friends' phones
       if (deviceRole === 'HOST') {
         if (msg.type === 'SCREEN_JOIN') {
@@ -1122,6 +1231,26 @@ export function useGameController() {
         if (msg.type === 'CLIENT_JOIN') {
           let seats = remoteSeatsRef.current;
           if (seats[fromPeerId]) return;
+          // Once the game is on, the room is locked. A phone that was in it (same device)
+          // walks back in; any other phone waits for the host to let it in or turn it away.
+          const known = msg.deviceId ? Object.values(seatDevicesRef.current).includes(msg.deviceId) : false;
+          // With no seat to give, the phone is told the room is full below.
+          const anySeat = remoteSeatsFor(hostPlaysRef.current).some((s) => !Object.values(seats).includes(s));
+          if (gameStatusRef.current === 'PLAYING' && !known && !admitted && anySeat) {
+            const pending = pendingJoinsRef.current;
+            if (pending[fromPeerId]) return;
+            if (Object.keys(pending).length >= 3) {
+              p2pRef.current?.send({type: 'JOIN_DENIED'}, fromPeerId);
+              p2pRef.current?.disconnectPeer(fromPeerId);
+              return;
+            }
+            p2pRef.current?.hold(fromPeerId);
+            pendingJoinsRef.current = {...pending, [fromPeerId]: msg};
+            setPendingJoins((list) => [...list, {peerId: fromPeerId, name: (msg.playerName || 'A phone').slice(0, 24)}]);
+            p2pRef.current?.send({type: 'JOIN_WAITING'}, fromPeerId);
+            gameAudio.playConfirmSelect();
+            return;
+          }
           // A phone that reloaded comes back before its old connection is noticed as gone:
           // the same device id as a seated phone means it replaces that connection. Names
           // aren't enough here, since two friends can easily share the default name.
@@ -1270,7 +1399,19 @@ export function useGameController() {
           if (mergeHistory(msg.history)) setSeenCountRefresh((c) => c + 1);
           return;
         }
+        if (msg.type === 'JOIN_WAITING') {
+          setJoinWaiting(true);
+          return;
+        }
+        if (msg.type === 'JOIN_DENIED') {
+          setJoinWaiting(false);
+          setP2PStatus('error');
+          setP2PDetail('This game has already started and the host did not let this phone in.');
+          p2pRef.current?.destroy();
+          return;
+        }
         if (msg.type === 'ROOM_FULL') {
+          setJoinWaiting(false);
           setP2PStatus('error');
           setP2PDetail(
             'This room already has 3 players. To play on this phone, open the game link on it (without scanning) and host from here instead.'
@@ -1281,6 +1422,7 @@ export function useGameController() {
         }
         if (msg.type === 'STATE_SYNC') {
           const s = msg.payload;
+          setJoinWaiting(false);
           if (s.seats) {
             const mine = s.seats[p2pRef.current?.peerId ?? ''];
             if (mine) setMySeat(mine);
@@ -1332,6 +1474,23 @@ export function useGameController() {
   const handleP2PMessageRef = useRef(handleP2PMessage);
   handleP2PMessageRef.current = handleP2PMessage;
 
+  /** Host: let in, or turn away, a phone that asked to join after the game started. */
+  const answerJoinRequest = useCallback((peerId: string, letIn: boolean) => {
+    const msg = pendingJoinsRef.current[peerId];
+    if (!msg) return;
+    const pending = {...pendingJoinsRef.current};
+    delete pending[peerId];
+    pendingJoinsRef.current = pending;
+    setPendingJoins((list) => list.filter((j) => j.peerId !== peerId));
+    p2pRef.current?.release(peerId);
+    if (letIn) {
+      handleP2PMessageRef.current(msg, peerId, true);
+    } else {
+      p2pRef.current?.send({type: 'JOIN_DENIED'}, peerId);
+      p2pRef.current?.disconnectPeer(peerId);
+    }
+  }, []);
+
   // Initialize P2P Connection Manager
   useEffect(() => {
     if (p2pRef.current) {
@@ -1364,6 +1523,13 @@ export function useGameController() {
             showToast('📺 Stream screen disconnected');
             return;
           }
+          if (pendingJoinsRef.current[peerId]) {
+            const pending = {...pendingJoinsRef.current};
+            delete pending[peerId];
+            pendingJoinsRef.current = pending;
+            setPendingJoins((list) => list.filter((j) => j.peerId !== peerId));
+            return;
+          }
           const seats = {...remoteSeatsRef.current};
           const seat = seats[peerId];
           if (!seat) return;
@@ -1390,7 +1556,8 @@ export function useGameController() {
         },
       },
       name && name !== 'Champion' ? name : undefined,
-      deviceRole === 'SCREEN' ? 'screen' : 'player'
+      deviceRole === 'SCREEN' ? 'screen' : 'player',
+      deviceRole === 'HOST' && savedGameAtLoad()?.roomCode === roomCode
     );
 
     p2pRef.current = mgr;
@@ -1609,7 +1776,7 @@ export function useGameController() {
   const onClueTimeUp = () => {
     const prev = activeClueRef.current;
     if (!prev || prev.endsAt === null) return;
-    const step = clueTimeUp(prev, SETTINGS.questionTimeLimit, Date.now());
+    const step = clueTimeUp(prev, SETTINGS.questionTimeLimit, Date.now(), hintGaps(prev.clue.hints, readAloudRef.current, speechRate()));
     if (step.kind === 'buzzers-open') {
       gameAudio.playHoverMicroTone();
       commitClue(step.next);
@@ -1689,7 +1856,8 @@ export function useGameController() {
     // On a Who Am I? clue an AI never buzzes on the first hint, and waits for a later hint
     // (plus a moment to read it) before its usual reaction time, so a human gets a fair shot.
     const hints = hintCount(activeClue);
-    const hintWait = (who: 'coach' | 'analyst') => (hints ? aiWhoAmIWaitMs(hints, activeClue.hintsShown ?? 1, chance(who)) : 0);
+    const hintWait = (who: 'coach' | 'analyst') =>
+      hints ? aiWhoAmIWaitMs(hints, activeClue.hintsShown ?? 1, chance(who), Math.random, hintGaps(activeClue.clue.hints, readAloud, speechRate())) : 0;
     const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait('coach');
     const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait('analyst');
 
@@ -1720,7 +1888,8 @@ export function useGameController() {
       if (!prev || prev.clue.id !== clueId || prev.phase !== 'BUZZER_OPEN') return;
       const next = {...prev, hintsShown: (prev.hintsShown ?? 1) + 1};
       commitClue({...next, feedbackText: `New hint! Now worth $${currentWorth(next).toLocaleString()}.`});
-    }, HINT_SECONDS * 1000);
+      // Read aloud, the hint on screen gets the time it takes to say before the next one shows.
+    }, (hintGaps(activeClue.clue.hints, readAloud, speechRate())[shown - 1] ?? 4) * 1000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceRole, activeClue?.clue.id, activeClue?.phase, activeClue?.hintsShown, activeClue?.endsAt === null]);
@@ -1943,6 +2112,64 @@ export function useGameController() {
       setFinalOptions(finalClue ? generateOptions(finalClue, answerMode) : []);
     }
   }, [deviceRole, activeClue, currentRound, round1Board, round2Board, answeredClueIds, contestants, buzzerSeats, finalClue, answerMode, generateOptions]);
+
+  // Host: keep a copy of the game between clues, so a reload doesn't end it. A clue that was
+  // open when the page reloaded goes back on the board, and a Final starts over at the wagers.
+  useEffect(() => {
+    if (deviceRole !== 'HOST') return;
+    if (gameState.status === 'VICTORY' || gameState.status === 'GAME_OVER') {
+      clearSavedGame();
+      setSavedGame(null);
+      return;
+    }
+    if (gameState.status !== 'PLAYING' || activeClue || !round1Board.length) return;
+    if (currentRound === 'RESULTS' || (currentRound === 'FINAL_SHOWDOWN' && finalShowdownPhase !== 'WAGER')) return;
+    const phoneSeats: Partial<Record<RemoteSeat, string>> = {...awaySeats};
+    for (const seat of Object.values(remoteSeats) as RemoteSeat[]) phoneSeats[seat] = contestants[seat].name;
+    const game: SavedGame = {
+      version: 1,
+      savedAt: Date.now(),
+      roomCode,
+      currentRound,
+      round1Board,
+      round2Board,
+      answeredClueIds: Array.from(answeredClueIds),
+      activeSelector,
+      contestants,
+      finalClue,
+      difficulty,
+      answerMode,
+      gameLength,
+      episodeCode,
+      isTwoPlayerMode,
+      isClientConnected,
+      hostPlays,
+      matchStats: {...matchStats},
+      bigPlay,
+      introducedRounds: [...introducedRoundsRef.current],
+      phoneSeats,
+      seatDevices: seatDevicesRef.current,
+    };
+    saveGame(game);
+    setSavedGame(game);
+  }, [
+    deviceRole,
+    gameState.status,
+    activeClue === null,
+    currentRound,
+    finalShowdownPhase,
+    round1Board,
+    round2Board,
+    answeredClueIds,
+    activeSelector,
+    contestants,
+    finalClue,
+    remoteSeats,
+    awaySeats,
+    categoryIntro,
+    isClientConnected,
+    isTwoPlayerMode,
+  ]);
 
   // Client: start the Final Showdown wager box at the same amount the host assumes (the whole bank).
   useEffect(() => {
@@ -2380,6 +2607,12 @@ export function useGameController() {
     setClientWager,
     p2pRef,
     remoteSeats,
+    savedGame,
+    resumeSavedGame,
+    discardSavedGame,
+    pendingJoins,
+    answerJoinRequest,
+    joinWaiting,
     mySeat,
     hostPlays,
     setHostPlays,
