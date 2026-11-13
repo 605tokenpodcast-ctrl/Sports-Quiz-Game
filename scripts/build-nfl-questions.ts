@@ -18,7 +18,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import { collegeName } from '../colleges';
+import { bigPlays, clockText, comebacks, PBP_COLUMNS, type BigPlay, type Play } from './big-plays';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = join(ROOT, '.cache', 'nflverse');
@@ -54,6 +56,30 @@ async function loadCsv(file: string, url: string): Promise<Row[]> {
     writeFileSync(path, Buffer.from(await res.arrayBuffer()));
   }
   return parse(readFileSync(path), { columns: true, skip_empty_lines: true, relax_quotes: true });
+}
+
+/** Play-by-play comes gzipped (~10 MB a season); only the columns big-plays.ts uses are kept. */
+async function loadPlayByPlay(season: number): Promise<Play[]> {
+  const file = `pbp_${season}.csv.gz`;
+  const path = join(CACHE, file);
+  try {
+    if (!OFFLINE || !existsSync(path)) {
+      const res = await fetch(`${RELEASES}/pbp/play_by_play_${season}.csv.gz`);
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      mkdirSync(CACHE, { recursive: true });
+      writeFileSync(path, Buffer.from(await res.arrayBuffer()));
+    }
+    const keep = new Set<string>(PBP_COLUMNS);
+    return parse(gunzipSync(readFileSync(path)), {
+      columns: (header: string[]) => header.map((h) => (keep.has(h) ? h : false)),
+      skip_empty_lines: true,
+      relax_quotes: true,
+    });
+  } catch (e) {
+    // Big plays are a bonus: without play-by-play the weekly column still gets its other storylines.
+    console.warn(`No play-by-play for ${season}: ${(e as Error).message}`);
+    return [];
+  }
 }
 
 async function loadCsvIfExists(file: string, url: string): Promise<Row[]> {
@@ -355,7 +381,8 @@ async function main() {
     games.filter((g) => num(g.season) === currentSeason && num(g.week) === w).every((g) => g.home_score !== '');
   const latestFullWeek = weekDone(throughWeek) ? throughWeek : throughWeek - 1;
 
-  const [rosters, weekStats, ...seasonStats] = await Promise.all([
+  const [pbp, rosters, weekStats, ...seasonStats] = await Promise.all([
+    currentSeason !== lastComplete ? loadPlayByPlay(currentSeason) : Promise.resolve([] as Play[]),
     loadCsvIfExists(`roster_${currentSeason}.csv`, `${RELEASES}/rosters/roster_${currentSeason}.csv`),
     loadCsvIfExists(`stats_player_week_${currentSeason}.csv`, `${RELEASES}/stats_player/stats_player_week_${currentSeason}.csv`),
     ...Array.from({ length: currentSeason - 1999 + 1 }, (_, i) =>
@@ -598,13 +625,22 @@ async function main() {
     const timesWord = (n: number) => (n === 2 ? 'twice' : n === 3 ? 'three times' : `${n} times`);
     const ydsTds = (yds: number, tds: number) => `${fmt(yds)} yards${tds === 1 ? ' and a touchdown' : tds ? ` and ${tds} touchdowns` : ''}`;
 
+    // Big plays from play-by-play: long touchdowns, pick-sixes, return TDs, Hail Marys, late
+    // game-winners, and the comebacks behind them.
+    const plays = bigPlays(pbp);
+    const comebackOf = new Map(comebacks(pbp).map((c) => [c.gameId, c]));
+    /** One of a few phrasings, the same one on every rebuild, so a week's clues don't all sound alike. */
+    const variant = (key: string, options: string[]) => options[parseInt(createHash('sha1').update(key).digest('hex').slice(0, 6), 16) % options.length];
+
     for (let w = Math.max(1, latestFullWeek - 2); w <= latestFullWeek; w++) {
       const weekGames = played.filter((g) => num(g.season) === cs && num(g.week) === w && g.game_type === 'REG');
       const gameById = new Map(weekGames.map((g) => [g.game_id, g]));
       const weekTeams = weekGames.flatMap((g) => [name(g, 'home'), name(g, 'away')]);
       const wk = weekStats.filter((r) => num(r.week) === w && r.season_type === 'REG' && gameById.has(r.game_id));
-      const stories: { gameId: string; score: number; kicker: boolean; emit: () => void }[] = [];
-      const story = (gameId: string, score: number, emit: () => void, kicker = false) => stories.push({ gameId, score, kicker, emit });
+      type Story = { gameId: string; score: number; emit: () => void; kicker?: boolean; team?: boolean; player?: string; kind?: string };
+      const stories: Story[] = [];
+      const story = (gameId: string, score: number, emit: () => void, o: Omit<Story, 'gameId' | 'score' | 'emit'> = {}) =>
+        stories.push({ gameId, score, emit, ...o });
       const diff = latestFullWeek - w; // older weeks are a little harder
 
       // ---- Team storylines: one per notable game, the best angle wins ----
@@ -615,7 +651,7 @@ async function main() {
         const hi = num(g[`${ws}_score`]), lo = num(g[`${ls}_score`]);
         const spread = num0(g.spread_line); // > 0 means the home team was favored
         const dogBy = homeWon ? -spread : spread; // how many points the winner was getting
-        return { g, winner: name(g, ws), loser: name(g, ls), wQb: g[`${ws}_qb_name`], lQb: g[`${ls}_qb_name`], hi, lo, margin: hi - lo, total: hi + lo, dogBy, ot: g.overtime === '1' };
+        return { g, winnerCode: g[`${ws}_team`], winner: name(g, ws), loser: name(g, ls), wQb: g[`${ws}_qb_name`], lQb: g[`${ls}_qb_name`], hi, lo, margin: hi - lo, total: hi + lo, dogBy, ot: g.overtime === '1' };
       });
       const biggestUpset = Math.max(0, ...info.map((i) => i.dogBy));
       const biggestRout = Math.max(0, ...info.map((i) => i.margin));
@@ -623,19 +659,24 @@ async function main() {
       for (const i of info) {
         const when = whenOf(i.g, w);
         const by = i.wQb ? `${i.wQb} and this team` : 'this team';
-        const angles: { score: number; clue: string }[] = [];
+        const angles: { score: number; clue: string; kind: string }[] = [];
         if (i.dogBy >= 3.5) angles.push({
-          score: 45 + i.dogBy * 4,
+          score: 45 + i.dogBy * 4, kind: 'upset',
           clue: `${when}, ${by} pulled off ${i.dogBy === biggestUpset ? 'the upset of the week' : 'an upset'}, knocking off ${i.lQb ? `${i.lQb} and ` : ''}the ${nickname(i.loser)} ${i.hi}-${i.lo} as ${i.dogBy}-point underdogs.`,
         });
-        if (i.ot) angles.push({ score: 62, clue: `${when}, it took overtime, but ${by} finally outlasted the ${i.loser}, ${i.hi}-${i.lo}.` });
-        if (i.lo === 0) angles.push({ score: 58, clue: `${when}, this team's defense pitched a shutout, blanking ${i.lQb ? `${i.lQb} and ` : ''}the ${nickname(i.loser)} ${i.hi}-0.` });
-        if (i.margin >= 21 && i.margin === biggestRout) angles.push({ score: 40 + i.margin, clue: `${when}, nobody rolled harder: ${by} hung ${i.hi} points on the ${i.loser} in a ${i.margin}-point rout.` });
-        if (i.total >= 55 && i.total === mostPoints) angles.push({ score: 35 + i.total / 2, clue: `${when}, ${by} survived the highest-scoring game of the week, a ${i.hi}-${i.lo} shootout with the ${i.loser}.` });
+        const cb = comebackOf.get(i.g.game_id);
+        if (cb && cb.winner === i.winnerCode && cb.deficit >= 14) angles.push({
+          score: 50 + cb.deficit * 2, kind: 'comeback',
+          clue: `${when}, ${by} erased a ${cb.deficit}-point deficit to stun the ${i.loser}, ${i.hi}-${i.lo}.`,
+        });
+        if (i.ot) angles.push({ score: 62, kind: 'ot', clue: `${when}, it took overtime, but ${by} finally outlasted the ${i.loser}, ${i.hi}-${i.lo}.` });
+        if (i.lo === 0) angles.push({ score: 58, kind: 'shutout', clue: `${when}, this team's defense pitched a shutout, blanking ${i.lQb ? `${i.lQb} and ` : ''}the ${nickname(i.loser)} ${i.hi}-0.` });
+        if (i.margin >= 21 && i.margin === biggestRout) angles.push({ score: 40 + i.margin, kind: 'rout', clue: `${when}, nobody rolled harder: ${by} hung ${i.hi} points on the ${i.loser} in a ${i.margin}-point rout.` });
+        if (i.total >= 55 && i.total === mostPoints) angles.push({ score: 35 + i.total / 2, kind: 'shootout', clue: `${when}, ${by} survived the highest-scoring game of the week, a ${i.hi}-${i.lo} shootout with the ${i.loser}.` });
         const best = angles.sort((a, b) => b.score - a.score)[0];
         if (!best) continue;
         story(i.g.game_id, best.score, () => add(weeklyCat, `wkteam_${i.g.game_id}`, best.clue, i.winner,
-          pickDistractors(i.winner, [], weekTeams.filter((t) => t !== i.loser), `wt${i.g.game_id}`), diff + 1, teamAliases(i.winner)));
+          pickDistractors(i.winner, [], weekTeams.filter((t) => t !== i.loser), `wt${i.g.game_id}`), diff + 1, teamAliases(i.winner)), { team: true, kind: best.kind });
       }
 
       // ---- Player storylines ----
@@ -645,8 +686,11 @@ async function main() {
         const us = num(g[`${side}_score`]), them = num(g[`${side === 'home' ? 'away' : 'home'}_score`]);
         const opp = nick(r.opponent_team);
         const oppQb = g[`${side === 'home' ? 'away' : 'home'}_qb_name`];
+        const ourQb = g[`${side}_qb_name`] !== r.player_display_name ? g[`${side}_qb_name`] : '';
         const res = us > them ? `in a ${us}-${them} win over the ${opp}` : us < them ? `in a ${them}-${us} loss to the ${opp}` : `in a ${us}-${them} tie with the ${opp}`;
-        return { g, opp, oppQb, res, won: us > them, us, them };
+        /** The result without the opponent, for clues that already name it. */
+        const score = us > them ? `in a ${us}-${them} win` : us < them ? `in a ${them}-${us} loss` : `in a ${us}-${them} tie`;
+        return { g, opp, oppQb, ourQb, res, score, won: us > them, us, them };
       };
       /** Wrong answers: same position group that week, busiest players first. */
       const peers = (r: Row, rank: (x: Row) => number) => wk
@@ -655,7 +699,7 @@ async function main() {
       const playerQ = (r: Row, kind: string, score: number, clue: string, rank: (x: Row) => number, extra = 0) =>
         story(r.game_id, score, () => add(weeklyCat, `wk_${cs}_${w}_${kind}_${r.player_id}`, clue, r.player_display_name,
           pickDistractors(r.player_display_name, peers(r, rank).slice(0, 4), peers(r, rank).slice(4, 30), `wp${w}${kind}${r.player_id}`),
-          diff + 1 + extra, nameAliases(r.player_display_name)), r.position === 'K');
+          diff + 1 + extra, nameAliases(r.player_display_name)), { kicker: r.position === 'K', player: r.player_id, kind });
       const fp = (x: Row) => num0(x.fantasy_points_ppr);
       const defRank = (x: Row) => num0(x.def_sacks) * 3 + num0(x.def_interceptions) * 3 + num0(x.def_tackles_solo);
       const kRank = (x: Row) => num0(x.fg_made) + num0(x.fg_long) / 10;
@@ -663,7 +707,8 @@ async function main() {
       let longestKick: Row | null = null;
       for (const r of wk) {
         if (!r.team || !nick(r.team)) continue;
-        const { opp, oppQb, res, us, them } = resultFor(r);
+        const { opp, oppQb, ourQb, res, score, us, them } = resultFor(r);
+        const v = (kind: string, options: string[]) => variant(`${w}${kind}${r.player_id}`, options);
         const team = nick(r.team);
         const when = whenOf(gameById.get(r.game_id)!, w);
         const pos = posWord(r.position);
@@ -677,7 +722,10 @@ async function main() {
 
         const pTd = num0(r.passing_tds), pYd = num0(r.passing_yards);
         if (pTd >= 4) playerQ(r, 'pass', 45 + pTd * 6 + pYd / 50,
-          `${when}, this ${team} quarterback carved up the ${opp} for ${pTd} touchdown passes and ${fmt(pYd)} yards.`, fp);
+          v('pass', [
+            `${when}, this ${team} quarterback carved up the ${opp} for ${pTd} touchdown passes and ${fmt(pYd)} yards.`,
+            `${when}, the ${opp} secondary had no answer for this ${team} quarterback, who threw ${pTd} touchdown passes ${score}.`,
+          ]), fp);
         else if (pYd >= 350) playerQ(r, 'pass', 40 + (pYd - 300) / 5,
           `${when}, this ${team} quarterback lit up the ${opp} for ${fmt(pYd)} passing yards ${res}.`, fp);
 
@@ -688,8 +736,12 @@ async function main() {
           `${when}, this ${team} quarterback did it with his legs, running for ${fmt(rYd)} yards ${res}.`, fp);
 
         const cYd = num0(r.receiving_yards), cTd = num0(r.receiving_tds), rec = num0(r.receptions);
-        if (cYd >= 140 || cTd >= 3) playerQ(r, 'rec', 40 + cYd / 10 + cTd * 8,
-          `${when}, this ${team} ${pos} hauled in ${plural(rec, 'catch', 'catches')} for ${ydsTds(cYd, cTd)} ${res}.`, fp);
+        if (cYd >= 140 || cTd >= 3) playerQ(r, 'rec', 40 + cYd / 10 + cTd * 8, ourQb
+          ? v('rec', [
+            `${when}, ${ourQb} kept going back to this ${team} ${pos}, who piled up ${ydsTds(cYd, cTd)} ${res}.`,
+            `${when}, the ${opp} couldn't cover this ${team} ${pos}: ${plural(rec, 'catch', 'catches')} from ${ourQb} for ${ydsTds(cYd, cTd)} ${score}.`,
+          ])
+          : `${when}, this ${team} ${pos} hauled in ${plural(rec, 'catch', 'catches')} for ${ydsTds(cYd, cTd)} ${res}.`, fp);
 
         const sacks = num0(r.def_sacks);
         if (sacks >= 3) playerQ(r, 'sacks', 50 + sacks * 5,
@@ -708,13 +760,128 @@ async function main() {
           `${whenOf(gameById.get(r.game_id)!, w)}, this ${nick(r.team)} kicker hit the longest field goal of the week, a ${num0(r.fg_long)}-yarder against the ${opp}.`, kRank, 1);
       }
 
-      // Keep the best of the week: no more than two questions from any one game, two kickers a week.
-      const perGame = new Map<string, number>();
+      // ---- Big plays ----
+      const statRow = (id: string) => (id ? wk.find((x) => x.player_id === id) : undefined);
+      const weekPlays = plays.filter((b) => b.week === w && gameById.has(b.gameId));
+      const longestTd = Math.max(0, ...weekPlays.filter((b) => b.kind === 'longTd').map((b) => b.yards));
+      for (const b of weekPlays) {
+        const r = statRow(b.playerId);
+        const team = nick(b.team), opp = nick(b.opp);
+        if (!r || !team || !opp) continue;
+        const g = gameById.get(b.gameId)!;
+        const side = g.home_team === b.team ? 'home' : 'away';
+        const us = num(g[`${side}_score`]), them = num(g[`${side === 'home' ? 'away' : 'home'}_score`]);
+        const when = whenOf(g, w);
+        const pos = posWord(r.position);
+        const qb = b.qbId !== b.playerId ? statRow(b.qbId)?.player_display_name ?? '' : '';
+        const yds = b.yards;
+        const key = `${b.gameId}_${b.playId}`;
+        const v = (options: string[]) => variant(key, options);
+        let clue = '', score = 0, extra = 1;
+        const atTheGun = b.beatTheClock ? ` as the ${b.qtr === 2 ? 'first half' : 'game'} ran out` : '';
+        switch (b.kind) {
+          case 'longTd':
+            if (yds < 60 && yds !== longestTd) break;
+            score = 42 + (yds - 50) * 0.8 + (yds === longestTd ? 8 : 0);
+            extra = 0;
+            if (b.via === 'run') {
+              const lane = b.detail === 'middle' ? 'up the middle' : b.detail ? `around the ${b.detail} side` : 'through a hole';
+              clue = r.position === 'QB'
+                ? `${when}, this ${team} quarterback tucked it and ran, ${yds} yards for a touchdown against the ${opp}.`
+                : v([
+                  `${when}, this ${team} ${pos} burst ${lane} and was gone, ${yds} yards to the end zone against the ${opp}.`,
+                  `${when}, nobody on the ${opp} could catch this ${team} ${pos} on a ${yds}-yard touchdown run.`,
+                ]);
+            } else if (!qb) {
+              clue = `${when}, this ${team} ${pos} took a pass ${yds} yards to the end zone against the ${opp}.`;
+            } else if (b.detail === 'deep') {
+              clue = v([
+                `${when}, ${qb} let it fly, and this ${team} ${pos} ran under it for a ${yds}-yard touchdown against the ${opp}.`,
+                `${when}, this ${team} ${pos} got behind the ${opp} defense and hauled in a ${yds}-yard touchdown bomb from ${qb}.`,
+              ]);
+            } else {
+              clue = v([
+                `${when}, ${qb} threw a short pass to this ${team} ${pos}, who turned it into a ${yds}-yard touchdown against the ${opp}${atTheGun}.`,
+                `${when}, this ${team} ${pos} caught a quick one from ${qb} and outran the whole ${opp} defense, ${yds} yards for a touchdown${atTheGun}.`,
+              ]);
+            }
+            break;
+          case 'hailMary':
+            score = 95;
+            clue = `${when}, with time running out in the ${b.qtr === 2 ? 'first half' : 'game'}, ${qb || `the ${team} quarterback`} heaved a Hail Mary and this ${team} ${pos} came down with it, a ${yds}-yard touchdown against the ${opp}.`;
+            break;
+          case 'pickSix': {
+            const victim = statRow(b.qbId)?.player_display_name || `the ${opp} quarterback`;
+            score = 70 + yds / 10;
+            clue = yds >= 5
+              ? v([
+                `${when}, this ${team} ${pos} jumped a ${victim} pass and took it ${yds} yards the other way for a pick-six.`,
+                `${when}, ${victim} threw one right to this ${team} ${pos}, who returned it ${yds} yards for a touchdown.`,
+              ])
+              : `${when}, this ${team} ${pos} picked off ${victim} and took it back for a touchdown.`;
+            break;
+          }
+          case 'fumbleTd': {
+            const victim = statRow(b.qbId)?.player_display_name;
+            score = 66 + yds / 10;
+            clue = yds >= 5
+              ? `${when}, this ${team} ${pos} scooped up a fumble${victim ? ` by ${victim}` : ''} and ran it back ${yds} yards for a touchdown against the ${opp}.`
+              : `${when}, this ${team} ${pos} pounced on a fumble${victim ? ` by ${victim}` : ''} for a defensive touchdown against the ${opp}.`;
+            break;
+          }
+          case 'kickReturnTd':
+            score = 70 + yds / 10;
+            clue = v([
+              `${when}, this ${team} ${pos} took a kickoff ${yds} yards to the house against the ${opp}.`,
+              `${when}, the ${opp} kicked off, and this ${team} ${pos} brought it back ${yds} yards for a touchdown.`,
+            ]);
+            break;
+          case 'puntReturnTd':
+            score = 70 + yds / 10;
+            clue = `${when}, the ${opp} punted to this ${team} ${pos}, who weaved ${yds} yards for a touchdown.`;
+            break;
+          case 'clutchTd': {
+            const how = b.via === 'pass'
+              ? `caught a ${yds}-yard touchdown${qb ? ` from ${qb}` : ''}`
+              : yds <= 2 ? `punched it in from ${yds === 1 ? 'a yard' : '2 yards'} out` : `ran in a ${yds}-yard touchdown`;
+            if (b.qtr >= 5) {
+              score = 85;
+              clue = `${when}, this ${team} ${pos} won it in overtime: he ${how} to beat the ${opp} ${us}-${them}.`;
+            } else {
+              score = 78 + b.trailedBy;
+              const spot = b.trailedBy ? `trailed by ${b.trailedBy}` : 'were tied';
+              clue = `${when}, the ${team} ${spot} with ${clockText(b.secondsLeft)} left until this ${pos} ${how}. They held on to beat the ${opp} ${us}-${them}.`;
+            }
+            break;
+          }
+        }
+        if (!clue) continue;
+        const rank = ['DL', 'LB', 'DB'].includes(posGroup(r.position)) ? defRank : fp;
+        const ps = peers(r, rank);
+        story(b.gameId, score, () => add(weeklyCat, `wkplay_${key}`, clue, r.player_display_name,
+          pickDistractors(r.player_display_name, ps.slice(0, 4), ps.slice(4, 30), `wb${key}`), diff + extra, nameAliases(r.player_display_name)),
+        { player: r.player_id, kind: b.kind });
+      }
+
+      // Keep the best of the week. One question per player. From any one game: either one team
+      // question or up to two player ones (a player clue names the result, which would give away a
+      // "this team" clue about the same game). At most two kickers a week, and no more than three of
+      // any one kind (three 140-yard rushing days is plenty).
+      const perGame = new Map<string, { team: number; player: number }>();
+      const players = new Set<string>();
+      const kinds = new Map<string, number>();
       let kept = 0, kickers = 0;
       for (const s of stories.sort((a, b) => b.score - a.score)) {
-        if (kept >= 12 || (perGame.get(s.gameId) ?? 0) >= 2 || (s.kicker && kickers >= 2)) continue;
+        const pg = perGame.get(s.gameId) ?? { team: 0, player: 0 };
+        if (kept >= 18 || (s.kicker && kickers >= 2) || (s.player && players.has(s.player))) continue;
+        // Ties can make two "biggest rout of the week" games; ask about one.
+        if (s.kind && (kinds.get(s.kind) ?? 0) >= (s.kind === 'rout' || s.kind === 'shootout' ? 1 : 3)) continue;
+        if (s.team ? pg.team + pg.player > 0 : pg.team > 0 || pg.player >= 2) continue;
         if (s.kicker) kickers++;
-        perGame.set(s.gameId, (perGame.get(s.gameId) ?? 0) + 1);
+        if (s.player) players.add(s.player);
+        if (s.kind) kinds.set(s.kind, (kinds.get(s.kind) ?? 0) + 1);
+        if (s.team) pg.team++; else pg.player++;
+        perGame.set(s.gameId, pg);
         s.emit();
         kept++;
       }
