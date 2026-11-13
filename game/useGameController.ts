@@ -90,6 +90,7 @@ import {
   aiBuzzChance,
   updateStreaks,
   HINT_SECONDS,
+  aiWhoAmIWaitMs,
   hintCount,
   shownClueText,
   currentWorth,
@@ -1634,17 +1635,18 @@ export function useGameController() {
     // Each AI decides once per clue whether it knows this one: it only buzzes when it thinks so,
     // and harder clues outside its specialty make that less likely.
     const {clue} = activeClue;
-    const knows = (who: 'coach' | 'analyst') =>
-      Math.random() < aiBuzzChance(aiCorrectChance(who === 'coach' ? aiConfig.coachAcc : aiConfig.analystAcc, who, clue.difficulty, clue.categoryId));
+    const chance = (who: 'coach' | 'analyst') => aiCorrectChance(who === 'coach' ? aiConfig.coachAcc : aiConfig.analystAcc, who, clue.difficulty, clue.categoryId);
+    const knows = (who: 'coach' | 'analyst') => Math.random() < aiBuzzChance(chance(who));
     const coachCanBuzz = !isTwoPlayerMode && !isClientConnected && !activeClue.buzzerLockout.coach && knows('coach');
     const analystCanBuzz = !player3Human && !activeClue.buzzerLockout.analyst && knows('analyst');
 
     const reflexMult = SETTINGS.aiReflexSpeedMultiplier;
-    // On a Who Am I? clue an AI may wait for a hint or two before it's sure.
+    // On a Who Am I? clue an AI never buzzes on the first hint, and waits for a later hint
+    // (plus a moment to read it) before its usual reaction time, so a human gets a fair shot.
     const hints = hintCount(activeClue);
-    const hintWait = () => (hints ? Math.floor(Math.random() * hints) * HINT_SECONDS * 1000 : 0);
-    const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait();
-    const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait();
+    const hintWait = (who: 'coach' | 'analyst') => (hints ? aiWhoAmIWaitMs(hints, activeClue.hintsShown ?? 1, chance(who)) : 0);
+    const coachDelay = (aiConfig.coachSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait('coach');
+    const analystDelay = (aiConfig.analystSpeed + (Math.random() * 1.2 - 0.4)) * 1000 * reflexMult + hintWait('analyst');
 
     const timeouts: ReturnType<typeof setTimeout>[] = [];
 

@@ -461,11 +461,23 @@ export function answerAliases(answer: string, extra: string[], isCollege = false
   });
 }
 
-/** Fills in each clue's `subjects`: the people (from every person answer in the bank) it names. */
+// Venue answers ("U.S. Bank Stadium", "GEHA Field at Arrowhead Stadium", "Georgia Dome").
+const VENUE_ANSWER = /\b(Stadium|Field|Dome|Superdome|Coliseum)$|\bField at /;
+
+/**
+ * Fills in each clue's `subjects`: what it's about besides its answer, so one clue can't give
+ * another away. That's the people (from every person answer in the bank) it names, the
+ * stadiums it names, and the Super Bowl it's about.
+ */
 function tagSubjects(categories: TriviaCategory[]): void {
   const people = new Map<string, string>(); // "Willie Roaf" -> "willieroaf"
+  const venues = new Map<string, string>(); // "u.s. bank stadium" -> "usbankstadium"
   for (const cat of categories) {
-    for (const q of cat.clues) if (answerKind(q.correctAnswer) === 'person') people.set(q.correctAnswer, normalizeAnswer(q.correctAnswer));
+    for (const q of cat.clues) {
+      const kind = answerKind(q.correctAnswer);
+      if (kind === 'person') people.set(q.correctAnswer, normalizeAnswer(q.correctAnswer));
+      else if (kind === 'other' && VENUE_ANSWER.test(q.correctAnswer)) venues.set(q.correctAnswer.toLowerCase(), normalizeAnswer(q.correctAnswer));
+    }
   }
   // Runs of 2 to 4 capitalized words, the shape of a name ("Patrick Mahomes", "Kenneth Walker III").
   const nameRun = /[A-Z][A-Za-z.'\-]+(?: [A-Z][A-Za-z.'\-]+){1,3}/g;
@@ -483,6 +495,12 @@ function tagSubjects(categories: TriviaCategory[]): void {
           }
         }
       }
+      // Stadiums named in the clue: "...in Super Bowl LII at U.S. Bank Stadium" and "The Vikings call this stadium home" can't share a game.
+      const text = q.clue.toLowerCase();
+      for (const [name, norm] of venues) if (text.includes(name)) found.add(norm);
+      // The Super Bowl it's about, so two clues about Super Bowl LII don't share a game.
+      for (const m of q.clue.matchAll(/\bSuper Bowl ([IVXLC]+)\b/g)) found.add(`superbowl${m[1].toLowerCase()}`);
+      if (/^Super Bowl [IVXLC]+$/.test(q.correctAnswer)) found.add(`superbowl${q.correctAnswer.slice(11).toLowerCase()}`);
       q.subjects = [...found];
     }
   }
@@ -507,6 +525,15 @@ const CATEGORY_FAMILIES: [RegExp, string][] = [
   [/^nfl_super_bowl/, 'super_bowl'],
 ];
 export const categoryFamily = (id: string) => CATEGORY_FAMILIES.find(([re]) => re.test(id))?.[1] ?? id;
+
+// Columns that ask the same kind of question: at most one of each type per game, so round 2
+// doesn't bring back "which college did he play at?" or another Draft Day decade.
+const CATEGORY_TYPES: [RegExp, string][] = [
+  [/^nfl_colleges_/, 'colleges'],
+  [/^nfl_drafted_by_/, 'draft_day'],
+  [/^nfl_super_bowl/, 'super_bowl'],
+];
+export const categoryType = (id: string) => CATEGORY_TYPES.find(([re]) => re.test(id))?.[1] ?? id;
 
 /** Big-game and famous-season columns. Every board gets at least one, besides the current column. */
 export const STORY_CATEGORY_IDS = new Set([
@@ -670,10 +697,11 @@ export const BOARD_LAYOUTS: Record<
 // ===========================================================================
 // BOARD GENERATOR
 // Within one game:
-// 1. No category repeats, and a board has at most one column of each family (one draft
-//    column, one college column ...), plus at least one big-game or famous-season column.
+// 1. No category repeats, and no category type repeats (one college column, one Draft Day
+//    decade, one Super Bowl column per game). A board has at most one column of each family
+//    (one draft-or-college column ...), plus at least one big-game or famous-season column.
 // 2. No question repeats.
-// 3. No answer repeats, and no person is the subject of two clues.
+// 3. No answer repeats, and no person, stadium or Super Bowl is the subject of two clues.
 // ===========================================================================
 
 export function generateBoardForRound(
@@ -693,7 +721,8 @@ export function generateBoardForRound(
 
   // Pick categories whose ID has NOT been used in this match session,
   // favouring ones that still have plenty of questions this device hasn't seen.
-  const availableCats = allCategories.filter((c) => !usedCategoryIds.has(c.id));
+  const usedTypes = new Set([...usedCategoryIds].map(categoryType));
+  const availableCats = allCategories.filter((c) => !usedCategoryIds.has(c.id) && !usedTypes.has(categoryType(c.id)));
   const unseenCount = (c: TriviaCategory) => c.clues.filter((q) => !seen.has(q.id)).length;
   const order = [
     ...fisherYatesShuffle(availableCats.filter((c) => unseenCount(c) >= ladderSize)),
@@ -713,7 +742,7 @@ export function generateBoardForRound(
   for (const cat of order) {
     if (selectedBoard.length >= categoryCount) break;
     const family = categoryFamily(cat.id);
-    if (familiesOnBoard.has(family)) continue;
+    if (familiesOnBoard.has(family) || usedTypes.has(categoryType(cat.id))) continue;
 
     // Clues not served yet whose answer and people are new this game, shuffled,
     // with questions this device has never seen first.
@@ -747,6 +776,7 @@ export function generateBoardForRound(
       markQuestionsSeen(ladderClues.map((c) => c.id));
       usedCategoryIds.add(cat.id);
       familiesOnBoard.add(family);
+      usedTypes.add(categoryType(cat.id));
       selectedBoard.push({id: cat.id, title: cat.title, description: cat.description, sport: cat.sport, clues: ladderClues});
     }
   }
