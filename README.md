@@ -13,6 +13,7 @@ npm run dev        # local dev server
 npm run build      # production build in dist/
 npm test           # type check plus the answer, voice and rules tests
 npm run test:game  # plays a whole game in a headless browser (needs Playwright)
+npm run test:browser  # every browser test: full game, laptop host, reconnect, host reload, phone layouts
 ```
 
 `npm run dev` also accepts `?board=2x2` (2 categories of 2 clues, add `&dd=0` for no
@@ -58,6 +59,15 @@ The first phone opens the game and taps **Invite Phones**. Friends scan the QR
 code or open the join link. The second phone to join is P2 and the third is P3.
 If only one friend joins, Stats Riley (AI) plays the third seat. Phones connect
 directly over WebRTC, using the free public PeerJS signaling server.
+
+**The room locks when the game starts.** A phone that was in the game walks straight back
+into its seat. Any other phone that scans in sees "Asking the host", and the host gets a
+**Let in / Turn away** prompt.
+
+**The host can reload.** The host device saves the game between clues (utils/savedGame.ts).
+After a reload, or a quit to the main menu, the start screen offers **Resume game**: same room
+code, same seats, same scores. Phones find the reopened room by themselves. A clue that was
+open goes back on the board, and a Final starts over at the wagers.
 
 To test multiplayer offline, run your own signaling server and point the game at it:
 

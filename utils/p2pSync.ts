@@ -119,6 +119,7 @@ export class P2PConnectionManager {
   private lastHeard = new Map<string, number>();
   // Host: phones waiting for the host's OK. They get heartbeats and direct messages, not the game.
   private held = new Set<string>();
+  private reopenTries = 0;
   // Phone only: reconnecting to the host after losing it.
   private hasJoined = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -152,8 +153,11 @@ export class P2PConnectionManager {
     role: 'host' | 'client',
     callbacks: P2PCallbacks,
     playerName = 'Friend',
-    joinAs: 'player' | 'screen' = 'player'
+    joinAs: 'player' | 'screen' = 'player',
+    reopening = false
   ) {
+    // A host reopening its room after a reload may find the broker still holding the old id for a moment.
+    this.reopenTries = reopening ? 20 : 0;
     this.roomCode = roomCode.toUpperCase().trim();
     this.isHost = role === 'host';
     this.callbacks = callbacks;
@@ -217,6 +221,17 @@ export class P2PConnectionManager {
       console.warn('[PeerJS] Error:', err);
       // A phone that was already in the game keeps trying: the host may be reloading or offline for a moment.
       if (!this.isHost && this.hasJoined && this.scheduleReconnect()) return;
+      if (err.type === 'unavailable-id' && this.isHost && this.reopenTries > 0 && !this.isDestroyed) {
+        this.reopenTries--;
+        this.callbacks.onStatus('connecting', 'Reopening the room...');
+        if (this.pingInterval) clearInterval(this.pingInterval);
+        this.peer?.destroy();
+        this.peer = null;
+        setTimeout(() => {
+          if (!this.isDestroyed) this.initPeer();
+        }, 3000);
+        return;
+      }
       if (err.type === 'unavailable-id' && this.isHost) {
         this.callbacks.onStatus('error', 'That room code is already in use. Pick a new room code.');
       } else if (err.type === 'peer-unavailable') {

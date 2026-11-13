@@ -23,6 +23,8 @@
     "test:host-only": "node tests/host-only-game.mjs",
     "test:phone-fit": "node tests/phone-fit.mjs",
     "test:reconnect": "node tests/reconnect.mjs",
+    "test:host-reload": "node tests/host-reload.mjs",
+    "test:browser": "npm run -s test:game && npm run -s test:host-only && npm run -s test:reconnect && npm run -s test:host-reload && npm run -s test:group-history && npm run -s test:read-aloud && npm run -s test:phone-fit",
     "test:ice": "tsx tests/ice-servers.ts",
     "test:choices": "tsx tests/wrong-choices.ts",
     "test:episode": "tsx tests/episode.ts",
