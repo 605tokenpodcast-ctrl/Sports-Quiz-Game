@@ -6,6 +6,8 @@
 // neural voices, Apple's Premium/Enhanced voices, then Google's. Players can also pick a
 // voice and a speed themselves (remembered on that device).
 
+import {pronounce} from './pronunciation';
+
 export const isSpeechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
 // --- Voices -----------------------------------------------------------------------------
@@ -188,12 +190,13 @@ function isRecord(before: string, after: string): boolean {
 /**
  * Rewrites a clue so every voice reads it naturally: "St." as Saint or State, "Jr." as
  * Junior, years as years, scores as "23 to 16", records as "11 and 6", Super Bowl numerals
- * as numbers. Without this, voices say "street", spell out roman numerals and read
- * years like big numbers.
+ * as numbers, and hard names the way they're said (utils/pronunciation.ts). Without this,
+ * voices say "street", spell out roman numerals, read years like big numbers and mangle
+ * names like Kelce and Favre.
  */
 export function spokenText(text: string): string {
   return (
-    text
+    pronounce(text)
       // "St. Louis", "Amon-Ra St. Brown" -> Saint; "Florida St. defensive end", "Ohio St." -> State.
       .replace(/\bSt\.(?=\s+[A-Z])/g, 'Saint')
       .replace(/\bSt\./g, 'State')
