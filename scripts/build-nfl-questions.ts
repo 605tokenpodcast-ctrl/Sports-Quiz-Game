@@ -2069,6 +2069,22 @@ async function main() {
     ]), c.player, pickDistractors(c.player, [...new Set(peers)].slice(0, 5), [...new Set(sameYear)], `deal${c.player}${y}`), num(c.value) >= 100e6 ? 2 : num(c.value) >= 60e6 ? 3 : 4, nameAliases(c.player));
   }
 
+  // ---- Hand-written columns (scripts/data/legends.json) ----------------------
+  // Their levels are set by hand, so they skip the curve below.
+  const handWritten = new Set<string>();
+  const legends = JSON.parse(readFileSync(join(ROOT, 'scripts', 'data', 'legends.json'), 'utf8')) as {
+    categories: { id: string; title: string; description: string; clues: { clue: string; answer: string; wrong: string[]; level: number; also?: string[] }[] }[];
+  };
+  for (const lc of legends.categories) {
+    const cat = category(lc.id, lc.title, lc.description);
+    handWritten.add(cat.id);
+    for (const c of lc.clues) {
+      // The id follows the answer and the start of the clue, so fixing a typo later keeps it.
+      add(cat, `hand_${lc.id}_${c.answer}_${c.clue.slice(0, 24)}`, c.clue, c.answer, c.wrong, c.level, [c.answer, ...(c.also ?? [])]);
+    }
+    for (const e of cat.entries) delete e.rank;
+  }
+
   // ---- Write ---------------------------------------------------------------
   const out = [...categories.values()].filter((c) => c.entries.length >= 5);
   // Drop accidental duplicates (same id from two templates).
@@ -2076,6 +2092,7 @@ async function main() {
   // Grade each column on a curve: its easiest fifth are the cheap tiles and its hardest fifth
   // the expensive ones, so every column can fill a board row by row at the right level.
   for (const c of out) {
+    if (handWritten.has(c.id)) continue;
     const ranked = [...c.entries].sort((a, b) => (a.rank ?? a.difficulty) - (b.rank ?? b.difficulty) || a.id.localeCompare(b.id));
     ranked.forEach((e, i) => {
       e.difficulty = 1 + Math.floor((i * 5) / ranked.length);

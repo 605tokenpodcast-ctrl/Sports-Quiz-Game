@@ -1,7 +1,7 @@
 /**
  * Sports Arena Quiz question engine (NFL only).
  *
- * Questions come from the hand-written bank in triviaDatasetPart.ts plus banks
+ * Questions come from public/questions/nfl.json (hand-written columns included) plus banks
  * loaded at runtime (public/questions/nfl.json, built weekly from nflverse data).
  *
  * Within one game no question, category or answer repeats, and questions this
@@ -380,6 +380,16 @@ export async function loadExternalQuestionBank(url = 'questions/nfl.json', attem
   return null;
 }
 
+/** The host's own column (from a Google Sheet, see utils/customColumn.ts), or null to remove it. */
+let customColumnId: string | null = null;
+export function setCustomColumn(spec: CategorySpec | null): void {
+  const at = EXTERNAL_SPECS.findIndex((c) => c.id === customColumnId);
+  if (at >= 0) EXTERNAL_SPECS.splice(at, 1);
+  customColumnId = spec ? spec.id : null;
+  if (spec) EXTERNAL_SPECS.push(spec);
+  COMPILED_CACHE = null;
+}
+
 /** Categories in play. The game is NFL only, so other sports in the old bank are skipped. */
 export function getActiveCategories(): TriviaCategory[] {
   return getAllCompiledCategories().filter((c) => c.sport === 'NFL');
@@ -588,11 +598,11 @@ export const categoryType = (id: string) => CATEGORY_TYPES.find(([re]) => re.tes
 /** Big-game and famous-season columns. Every board gets at least one, besides the current column. */
 export const STORY_CATEGORY_IDS = new Set([
   'nfl_super_bowl',
-  'nfl_super_bowl_mvps',
   'nfl_super_bowl_details',
   'nfl_conference_title',
   'nfl_records',
-  'nfl_records_legends',
+  'nfl_legends_lore',
+  'nfl_greatest_hits',
   'nfl_playoff_heroes',
   'nfl_monster_games',
   'nfl_prime_time',
@@ -831,6 +841,10 @@ export function generateBoardForRound(
   }
   const featuredIdx = order.findIndex((c) => c.id === featuredCategoryId);
   if (featuredIdx > 0) order.unshift(...order.splice(featuredIdx, 1));
+  // The host's own column always makes Round 1 (not with an episode code: other devices don't have it).
+  const customIdx = order.findIndex((c) => c.id === customColumnId);
+  if (round === 'ROUND_1' && useHistory() && customIdx >= 0) order.unshift(...order.splice(customIdx, 1));
+  else if (customIdx >= 0) order.splice(customIdx, 1);
 
   const selectedBoard: TriviaCategory[] = [];
   const familiesOnBoard = new Set<string>();
@@ -895,7 +909,6 @@ export function generateBoardForRound(
  */
 export const FINAL_CATEGORY_IDS = new Set([
   'nfl_super_bowl',
-  'nfl_super_bowl_mvps',
   'nfl_super_bowl_details',
   'nfl_conference_title',
   'nfl_records',
@@ -904,8 +917,8 @@ export const FINAL_CATEGORY_IDS = new Set([
   'nfl_passing_leaders',
   'nfl_rushing_leaders',
   'nfl_receiving_leaders',
-  'nfl_records_legends',
-  'nfl_franchises_stadiums',
+  'nfl_legends_lore',
+  'nfl_greatest_hits',
   'nfl_playoff_heroes',
   'nfl_monster_games',
   'nfl_comeback_kings',

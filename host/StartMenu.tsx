@@ -8,6 +8,7 @@ import {useGame} from '../game/GameContext';
 import {savedGameSummary} from '../utils/savedGame';
 import VoiceSettings from './VoiceSettings';
 import FlaggedQuestions from './FlaggedQuestions';
+import CustomColumn from './CustomColumn';
 
 export default function StartMenu() {
   const {
@@ -266,6 +267,8 @@ export default function StartMenu() {
             </div>
 
             <FlaggedQuestions />
+
+            <CustomColumn />
 
             {/* Episode code: the same boards on any device, so listeners can play the show's game */}
             <div className="w-full mb-3 text-left">

@@ -55,6 +55,15 @@ npm run questions -- --history    # also rebuilds scripts/data/history.json (see
   most-added players from Sleeper's public trending list; if Sleeper can't be reached the column
   is left out until the next build.
 - **Show Me the Money** uses nflverse's contract history (from Over the Cap).
+- **Hand-written columns.** Legends & Lore and Greatest Hits live in `scripts/data/legends.json`
+  (clue, answer, wrong answers, level 1 to 5). The builder folds them in with the levels as written.
+  Add a clue there and it goes live with the next build.
+
+**Your own column.** On the start screen, **Add your own column from a Google Sheet** takes a sheet
+link and a title. The sheet's first row needs **Clue** and **Answer**; **Wrong 1, Wrong 2, ...** and
+**Level** (1 to 5) are optional, and without levels the top rows are the cheap tiles. Share it as
+"Anyone with the link can view". The column is on every Round 1 board on that device, it's read
+again each time the game opens, and episode codes leave it out (`npm run test:custom`).
 
 The **Refresh NFL questions** GitHub Action does this every Tuesday, which keeps the
 "this week" and "this season" categories current. Every game has one current column on
