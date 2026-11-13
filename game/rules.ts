@@ -225,6 +225,25 @@ export const HINT_SECONDS = 4;
 export const hintCount = (c: Pick<ActiveClueState, 'clue' | 'isBonusWager'>) =>
   !c.isBonusWager && c.clue.hints && c.clue.hints.length > 1 ? c.clue.hints.length : 0;
 
+/** Seconds a player gets to read a hint that just appeared before an AI can buzz on it. */
+export const AI_HINT_READ_SECONDS = 1.5;
+
+/**
+ * How long an AI waits on a Who Am I? clue before its normal reaction time starts, in ms.
+ * An AI never buzzes on the first hint alone, so a human always gets the opening hint to
+ * themselves. It works out who it is after a later hint: hint 2 at least, and each further
+ * hint is a coin flip weighted by how likely it is to know (a sure AI tends to go earlier).
+ * `shown` hints are already up (after a miss every hint is up and there's no wait).
+ */
+export function aiWhoAmIWaitMs(total: number, shown: number, correctChance: number, random: () => number = Math.random): number {
+  if (total < 2) return 0;
+  let needed = 2;
+  while (needed < total && random() > correctChance) needed++;
+  const hintsToWaitFor = needed - Math.max(1, shown);
+  if (hintsToWaitFor <= 0) return 0;
+  return (hintsToWaitFor * HINT_SECONDS + AI_HINT_READ_SECONDS) * 1000;
+}
+
 /** A tile's value with `shown` of `total` hints up: full with one hint, then down by equal steps (rounded to $100). */
 export const hintValue = (value: number, shown: number, total: number) =>
   total ? Math.max(100, Math.round((value * (total - Math.min(shown, total) + 1)) / total / 100) * 100) : value;

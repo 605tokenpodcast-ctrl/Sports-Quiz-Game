@@ -27,6 +27,7 @@ import {
   isOnFire,
   remoteBuzzTime,
   HINT_SECONDS,
+  aiWhoAmIWaitMs,
   hintValue,
   shownClueText,
   currentWorth,
@@ -277,5 +278,17 @@ check('Who Am I? shows one hint at a time and the tile is worth less with each o
   assert.equal(shownClueText({...missed, phase: 'REVEALED'}), 'A, B and C.');
   assert.equal(shownClueText(clue({clue: who, isBonusWager: true, phase: 'ANSWERING'})), 'A, B and C.');
 });
+
+// Who Am I? vs AI: an AI never buzzes on the first hint alone.
+{
+  const early = () => 0; // gets it as soon as it can
+  const late = () => 1; // waits for every hint
+  assert.equal(aiWhoAmIWaitMs(3, 1, 0.99, early), (HINT_SECONDS + 1.5) * 1000, 'a sure AI still waits for hint 2');
+  assert.equal(aiWhoAmIWaitMs(3, 1, 0.2, late), (2 * HINT_SECONDS + 1.5) * 1000, 'an unsure AI waits for the last hint');
+  assert.equal(aiWhoAmIWaitMs(3, 3, 0.2, late), 0, 'after a miss every hint is up, so no wait');
+  assert.equal(aiWhoAmIWaitMs(0, 1, 0.9), 0, 'not a Who Am I? clue');
+  for (let i = 0; i < 500; i++) assert.ok(aiWhoAmIWaitMs(3, 1, Math.random()) >= HINT_SECONDS * 1000, 'never before hint 2');
+  console.log('ok   Who Am I? AI waits for hint 2 or later, and a moment to read it');
+}
 
 if (failed) process.exit(1);

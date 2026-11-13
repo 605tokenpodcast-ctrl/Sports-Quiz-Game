@@ -48,6 +48,9 @@ for (const length of ['FULL', 'SHORT'] as const) {
     const clues = [...s.round1Board, ...s.round2Board].flatMap((c) => c.clues).concat(s.finalClue);
     const people = clues.flatMap((q) => [...new Set([T.normalizeAnswer(q.correctAnswer), ...(q.subjects ?? [])])]);
     const repeat = people.find((p, i) => people.indexOf(p) !== i);
+    // One college column, one Draft Day decade and one Super Bowl column per game.
+    const types = [...s.round1Board, ...s.round2Board].map((c) => T.categoryType(c.id));
+    assert.equal(new Set(types).size, types.length, `${length} game repeats a category type: ${types}`);
     assert.equal(repeat, undefined, `${length} game asks about ${repeat} twice`);
   }
   const { cats, r1, r2 } = expected[length];
