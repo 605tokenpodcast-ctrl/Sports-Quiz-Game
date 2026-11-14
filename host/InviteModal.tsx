@@ -24,6 +24,7 @@ export default function InviteModal() {
     handleCopyInviteLink,
     handleCopyRoomCode,
     streamScreenUrl,
+    stripUrl,
     greenScreenUrl,
     screenCount,
   } = useGame();
@@ -227,6 +228,21 @@ export default function InviteModal() {
                     <span>Open</span>
                   </a>
                 </div>
+                <p className="text-[11px] text-slate-400 leading-tight mt-1">
+                  Just the scores? The scoreboard strip is one bar along the bottom (names, scores, who buzzed, the clue in play)
+                  on a see-through background, for an OBS Browser Source over your camera. Add <code>&amp;bg=green</code> to key it instead.
+                </p>
+                <button
+                  onClick={() =>
+                    navigator.clipboard
+                      .writeText(stripUrl)
+                      .then(() => showToast('✓ Scoreboard strip link copied!'))
+                      .catch(() => showToast(stripUrl))
+                  }
+                  className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5">
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>COPY SCOREBOARD STRIP LINK</span>
+                </button>
               </div>
             )}
 

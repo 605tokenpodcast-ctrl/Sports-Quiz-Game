@@ -12,7 +12,9 @@ export type P2PMessage =
   | { type: 'CLIENT_JOIN'; playerName?: string; deviceId?: string; history?: SharedHistory }
   // Host to a phone that just joined: the group's question history, so that phone can host next time.
   | { type: 'QUESTION_HISTORY'; history: SharedHistory }
-  | { type: 'SCREEN_JOIN' } // a big-screen stream view that only watches
+  // A big-screen stream view that only watches. quiet: the scoreboard strip, which makes no sound,
+  // so the host (or a full stream screen) keeps reading clues aloud.
+  | { type: 'SCREEN_JOIN'; quiet?: boolean }
   // reactionMs: how long after this phone showed the open buzzer the player tapped (for clueId).
   // early: tapped while this phone still showed "wait for the light" (it may reach the host after the light).
   | { type: 'CLIENT_BUZZ'; contestantId: string; timestamp: number; reactionMs?: number; clueId?: string; early?: boolean }
@@ -25,6 +27,9 @@ export type P2PMessage =
   // The game is on and the room is locked: the host has been asked to let this phone in.
   | { type: 'JOIN_WAITING' }
   | { type: 'JOIN_DENIED' }
+  // A player's emoji reaction (phone to host), passed on by the host to every screen.
+  | { type: 'CLIENT_REACTION'; emoji: string }
+  | { type: 'REACTION'; emoji: string; seat: string; id: number }
   | { type: 'PING'; time: number }
   | { type: 'PONG'; time: number };
 
@@ -108,7 +113,7 @@ export class P2PConnectionManager {
   private isHost = false;
   private roomCode = '';
   private playerName: string;
-  private joinAs: 'player' | 'screen';
+  private joinAs: 'player' | 'screen' | 'strip';
   private callbacks: P2PCallbacks;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private isDestroyed = false;
@@ -153,7 +158,7 @@ export class P2PConnectionManager {
     role: 'host' | 'client',
     callbacks: P2PCallbacks,
     playerName = 'Friend',
-    joinAs: 'player' | 'screen' = 'player',
+    joinAs: 'player' | 'screen' | 'strip' = 'player',
     reopening = false
   ) {
     // A host reopening its room after a reload may find the broker still holding the old id for a moment.
@@ -324,7 +329,7 @@ export class P2PConnectionManager {
       this.lostHostAt = 0;
       this.setupDataConnection(conn);
       this.callbacks.onStatus('connected', back ? 'Back in the game!' : 'Connected to the host!');
-      this.send(this.joinAs === 'screen' ? { type: 'SCREEN_JOIN' } : { type: 'CLIENT_JOIN', playerName: this.playerName, deviceId: P2PConnectionManager.deviceId(), history: exportHistory() });
+      this.send(this.joinAs !== 'player' ? { type: 'SCREEN_JOIN', quiet: this.joinAs === 'strip' } : { type: 'CLIENT_JOIN', playerName: this.playerName, deviceId: P2PConnectionManager.deviceId(), history: exportHistory() });
     });
 
     conn.on('error', (err: any) => {

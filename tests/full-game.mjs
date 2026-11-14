@@ -68,6 +68,14 @@ try {
   const finished = await visible('text=PLAY AGAIN');
   console.log(finished ? 'ok   game reached the results screen' : 'FAIL game did not finish in 4 minutes');
   console.log(`     steps seen: ${[...seen].join(', ')}`);
+  if (finished) {
+    const [download] = await Promise.all([page.waitForEvent('download', {timeout: 5000}).catch(() => null), page.click('[data-show-notes]')]);
+    const notes = download ? await (await import('node:fs/promises')).readFile(await download.path(), 'utf8') : '';
+    const ok = /^# Sports Arena Showdown/.test(notes) && notes.includes('## Final scores') && notes.includes('## Round 2') && notes.includes('## Final Showdown');
+    if (process.env.DUMP_NOTES) console.log(notes);
+    console.log(ok ? `ok   show notes download (${notes.split('\n- ').length - 1} clues listed)` : 'FAIL show notes did not download');
+    if (!ok) failed = true;
+  }
   for (const step of ['round 2', 'daily double', 'buzz', 'answer', 'final wager', 'final submit']) {
     if (!seen.has(step)) console.log(`FAIL never saw: ${step}`);
   }
