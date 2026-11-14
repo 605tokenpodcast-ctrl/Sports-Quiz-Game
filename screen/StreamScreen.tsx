@@ -1,6 +1,8 @@
 // The stream screen: a big-screen view of the game for a laptop or TV on the stream or recording.
 // It only watches. The host device runs the game and everyone plays from their phones.
 import {useEffect, useState} from 'react';
+import CategoryDraft from '../ui/CategoryDraft';
+import {PickemCard, PickemPayoutBanner} from '../ui/Pickem';
 import {Trophy, Zap, Clock, Flame, Star, Lock, Volume2, VolumeX, Music, Megaphone, Tv, Share2} from 'lucide-react';
 import BackgroundMusic from '../utils/BackgroundMusic';
 import TimeLeft from '../utils/TimeLeft';
@@ -120,6 +122,9 @@ function FullStreamScreen() {
     readAloud,
     toastMessage,
     categoryIntro,
+    draft,
+    pickem,
+    pickemResult,
   } = game;
   // Browsers keep a page silent until someone taps it, so the screen starts with one tap.
   const [started, setStarted] = useState(false);
@@ -218,7 +223,10 @@ function FullStreamScreen() {
           laptop screen the board shrinks instead of running under the scoreboard. */}
       <main className="relative z-10 flex-1 min-h-0 overflow-hidden flex items-center justify-center p-[clamp(0.5rem,1.5vh,1.5rem)]">
         {!playing && !over && <Lobby />}
-        {playing && currentRound !== 'FINAL_SHOWDOWN' && (
+        {playing && draft && !activeClue && (
+          <CategoryDraft draft={draft} board={board} contestants={contestants} mine={false} onStrike={() => {}} big />
+        )}
+        {playing && !draft && currentRound !== 'FINAL_SHOWDOWN' && (
           <div className="w-full h-full max-w-[1600px] flex flex-col gap-2">
             <div className="shrink-0 flex items-center justify-between text-[clamp(0.9rem,2.4vh,1.25rem)] font-bold px-1">
               <span className="flex items-center gap-2 text-amber-300">
@@ -276,7 +284,13 @@ function FullStreamScreen() {
           </div>
         )}
         {playing && currentRound === 'FINAL_SHOWDOWN' && <FinalPanel />}
-        {over && <Results />}
+        {over && !pickem && <Results />}
+        {over && pickem && (
+          <div className="w-full max-w-xl">
+            <PickemCard pickem={pickem} seat={null} contestants={contestants} lineup={activeContestantsList} onPick={() => {}} onLock={() => {}} />
+          </div>
+        )}
+        <PickemPayoutBanner result={pickemResult} />
         {playing && activeClue && <ClueOverlay />}
       </main>
 
@@ -354,7 +368,7 @@ function ClueOverlay() {
         <div className="flex items-center justify-between gap-4 text-[clamp(1rem,3.6vh,1.875rem)] font-black uppercase">
           <span className="text-amber-300">{clue.category}</span>
           <span className="text-amber-400">
-            {activeClue.isBonusWager ? `Daily Double · ${money(activeClue.bonusWagerInput)}` : money(currentWorth(activeClue))}
+            {activeClue.isBonusWager ? `${activeClue.goForTwo ? 'Go for two' : 'Daily Double'} · ${money(activeClue.bonusWagerInput)}` : money(currentWorth(activeClue))}
           </span>
         </div>
 

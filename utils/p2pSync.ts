@@ -29,6 +29,9 @@ export type P2PMessage =
   | { type: 'JOIN_DENIED' }
   // A player's emoji reaction (phone to host), passed on by the host to every screen.
   | { type: 'CLIENT_REACTION'; emoji: string }
+  | { type: 'CLIENT_GO_FOR_TWO'; accept: boolean }
+  | { type: 'CLIENT_DRAFT_STRIKE'; categoryId: string }
+  | { type: 'CLIENT_PICKEM'; gameId: string | null; team: string | null; lockIn?: boolean }
   | { type: 'REACTION'; emoji: string; seat: string; id: number }
   | { type: 'PING'; time: number }
   | { type: 'PONG'; time: number };
@@ -127,6 +130,8 @@ export class P2PConnectionManager {
   private reopenTries = 0;
   // Phone only: reconnecting to the host after losing it.
   private hasJoined = false;
+  /** Phone: tries left to find a room that isn't open yet (a QR scanned before the host is online). */
+  private findRoomTries = 6;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private lostHostAt = 0;
@@ -226,6 +231,16 @@ export class P2PConnectionManager {
       console.warn('[PeerJS] Error:', err);
       // A phone that was already in the game keeps trying: the host may be reloading or offline for a moment.
       if (!this.isHost && this.hasJoined && this.scheduleReconnect()) return;
+      // A phone can get to the room before the host does (or while the host page is still loading),
+      // so a room that isn't there yet is looked for again for a few seconds before giving up.
+      if (err.type === 'peer-unavailable' && !this.isHost && !this.hasJoined && this.findRoomTries > 0 && !this.isDestroyed) {
+        this.findRoomTries--;
+        this.callbacks.onStatus('connecting', 'Looking for the room...');
+        setTimeout(() => {
+          if (!this.isDestroyed && !this.hasJoined) this.connectToHost();
+        }, 1500);
+        return;
+      }
       if (err.type === 'unavailable-id' && this.isHost && this.reopenTries > 0 && !this.isDestroyed) {
         this.reopenTries--;
         this.callbacks.onStatus('connecting', 'Reopening the room...');

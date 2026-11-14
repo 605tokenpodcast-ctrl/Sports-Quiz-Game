@@ -14,7 +14,24 @@ export const TIMES = {
   showCorrect: 2.8, // how long the answer stays up after a right answer
   showAnswer: 3, // how long the answer stays up after a miss
   final: 30, // answering the Final Showdown
+  goForTwoOffer: 7, // deciding whether to go for two
 };
+
+// --- Football scoring: pick-six and go for two ------------------------------------------
+
+/** A right answer right after an opponent missed the same clue pays this much more. */
+export const PICK_SIX_MULTIPLIER = 1.5;
+
+/** What a right answer pays with the pick-six bonus, or null when it doesn't apply. */
+export function pickSixPayout(prev: ActiveClueState, stake: number): number | null {
+  if (prev.isBonusWager || !Object.values(prev.buzzerLockout).some(Boolean)) return null;
+  return Math.round((stake * PICK_SIX_MULTIPLIER) / 10) * 10;
+}
+
+/** Whether a right answer on this clue earns the offer to go for two. */
+export function earnsGoForTwo(prev: ActiveClueState, roundMaxClue: number, humanAnswered: boolean): boolean {
+  return humanAnswered && !prev.isBonusWager && !prev.goForTwo && prev.clue.value >= roundMaxClue;
+}
 
 /**
  * Buzzing while the clue is still being read locks that player out for this long, as on TV,
@@ -392,5 +409,18 @@ export function clueTimeUp(prev: ActiveClueState, questionTimeLimit: number, now
     case 'REVEALED':
     default:
       return {kind: 'done'};
+  }
+}
+
+/**
+ * Hides `count` Daily Doubles on a board, each in a different column. Changes the board's clues in place.
+ */
+export function placeDailyDoubles(board: {clues: {isBonusWager?: boolean}[]}[], count: number, random: () => number = Math.random): void {
+  const cols = board.map((_, i) => i);
+  for (let n = 0; n < count && cols.length; n++) {
+    const col = cols.splice(Math.floor(random() * cols.length), 1)[0];
+    const clues = board[col].clues;
+    if (!clues.length) continue;
+    clues[Math.floor(random() * clues.length)].isBonusWager = true;
   }
 }

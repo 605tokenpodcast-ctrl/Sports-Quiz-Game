@@ -7,6 +7,8 @@ import {useGame} from '../game/GameContext';
 import Scoreboard from './Scoreboard';
 import Stage from './Stage';
 import ClueCard from './ClueCard';
+import DraftOverlay from './DraftOverlay';
+import {PickemPayoutBanner} from '../ui/Pickem';
 import TagEditor from './TagEditor';
 import LeaderboardModal from './LeaderboardModal';
 import StartMenu from './StartMenu';
@@ -16,7 +18,7 @@ import HowToPlay from './HowToPlay';
 import ResultsOverlay from './ResultsOverlay';
 
 export default function HostStudio() {
-  const {musicMuted, toastMessage, activeBgmUrl, isMusicPlaying, pendingJoins, answerJoinRequest} = useGame();
+  const {musicMuted, toastMessage, activeBgmUrl, isMusicPlaying, pendingJoins, answerJoinRequest, pickemResult} = useGame();
   return (
     <div className="fixed inset-0 overflow-hidden touch-none flex flex-col bg-slate-950 text-white font-sans select-none">
       {/* Background BGM */}
@@ -62,6 +64,8 @@ export default function HostStudio() {
       <Scoreboard />
       <Stage />
       <ClueCard />
+      <DraftOverlay />
+      <PickemPayoutBanner result={pickemResult} />
       <TagEditor />
       <LeaderboardModal />
       <StartMenu />

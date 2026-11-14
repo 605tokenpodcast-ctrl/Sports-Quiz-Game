@@ -440,6 +440,49 @@ function careerFeats(d: Row): string[] {
 const joinAnd = (parts: string[]) => (parts.length <= 1 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
 // ---------------------------------------------------------------------------
+// Pick'em: three of the coming week's games to pick at the end of a game, and recent winners
+// so the next game can pay out the right picks.
+// ---------------------------------------------------------------------------
+
+export function pickemData(games: Row[], now: Date) {
+  const today = now.toISOString().slice(0, 10);
+  const upcoming = games
+    .filter((g) => g.home_score === '' && g.gameday >= today && g.away_team && g.home_team)
+    .sort((a, b) => (a.gameday + a.gametime).localeCompare(b.gameday + b.gametime));
+  const first = upcoming[0];
+  const week = first ? upcoming.filter((g) => g.season === first.season && g.week === first.week && g.game_type === first.game_type) : [];
+  // The night games first (Thursday, Sunday and Monday night), then the closest spreads.
+  const night = (g: Row) => (g.weekday !== 'Sunday' || g.gametime >= '19:00' ? 0 : 1);
+  const label = (g: Row) =>
+    g.weekday === 'Thursday' ? 'Thursday Night' : g.weekday === 'Monday' ? 'Monday Night' : g.weekday === 'Sunday' && g.gametime >= '19:00' ? 'Sunday Night' : g.weekday;
+  const picked = [...week]
+    .sort((a, b) => night(a) - night(b) || Math.abs(num(a.spread_line)) - Math.abs(num(b.spread_line)) || a.game_id.localeCompare(b.game_id))
+    .slice(0, 3)
+    .sort((a, b) => (a.gameday + a.gametime).localeCompare(b.gameday + b.gametime));
+  const season = first ? num(first.season) : 0;
+  const results: Record<string, string> = {};
+  for (const g of games) {
+    if (g.home_score === '' || num(g.season) < season - 1) continue;
+    if (g.gameday < new Date(now.getTime() - 60 * 86400000).toISOString().slice(0, 10)) continue;
+    const h = num(g.home_score), a = num(g.away_score);
+    results[g.game_id] = h > a ? g.home_team : a > h ? g.away_team : 'TIE';
+  }
+  return {
+    week: first ? `${first.game_type === 'REG' ? 'Week' : first.game_type} ${first.game_type === 'REG' ? first.week : ''}`.trim() : '',
+    games: picked.map((g) => ({
+      id: g.game_id,
+      day: g.gameday,
+      label: label(g),
+      away: g.away_team,
+      home: g.home_team,
+      awayName: teamName(g.away_team, season),
+      homeName: teamName(g.home_team, season),
+    })),
+    results,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -2106,6 +2149,7 @@ async function main() {
     dataThrough: currentSeason !== lastComplete ? `${currentSeason} season, Week ${latestFullWeek}` : `${lastComplete} season`,
     source: 'nflverse (https://github.com/nflverse), CC BY 4.0',
     questionCount: total,
+    pickem: pickemData(games, new Date()),
     categories: out,
   }));
   console.log(`Wrote ${total} questions in ${out.length} categories to ${OUT}`);

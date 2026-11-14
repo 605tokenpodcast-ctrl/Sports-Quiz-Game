@@ -8,6 +8,10 @@ import VoiceAnswerButton, {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {FinalChoices} from '../ui/shared';
 import {REACTION_EMOJI} from '../utils/reactions';
 import {useGame} from '../game/GameContext';
+import GoForTwoOffer from '../ui/GoForTwoOffer';
+import CategoryDraft from '../ui/CategoryDraft';
+import {PickemCard, PickemPayoutBanner} from '../ui/Pickem';
+import {draftTurn} from '../game/types';
 
 export default function PhoneScreen() {
   // Shows "Too early!" for a moment after a buzz before the light.
@@ -51,6 +55,12 @@ export default function PhoneScreen() {
     categoryIntro,
     sendClientBuzz,
     sendReaction,
+    decideGoForTwo,
+    draft,
+    strikeDraftColumn,
+    pickem,
+    pickemResult,
+    setPickemPick,
   } = useGame();
     const isPlayer2Selector = activeSelector === mySeat;
     const isPlayer2Buzzed = activeClue?.buzzedContestantId === mySeat;
@@ -62,6 +72,7 @@ export default function PhoneScreen() {
 
     return (
       <div className="fixed inset-0 overflow-y-auto bg-slate-950 text-white font-sans flex flex-col justify-between p-3 sm:p-4 short:p-2 select-none touch-manipulation">
+        <PickemPayoutBanner result={pickemResult} />
         {/* Background Atmosphere */}
         <div className="absolute inset-0 z-0 bg-gradient-to-t from-slate-950 via-slate-900 to-blue-950 opacity-90 pointer-events-none" />
 
@@ -158,7 +169,7 @@ export default function PhoneScreen() {
                   <span className="text-xs font-black text-amber-400 uppercase">{activeClue.clue.category}</span>
                   <span className="text-xs font-black text-amber-300 bg-blue-950 px-2 py-0.5 rounded border border-blue-700">
                     ${currentWorth(activeClue)}
-                    {activeClue.isBonusWager && <span className="ml-1 text-amber-400">DAILY DOUBLE</span>}
+                    {activeClue.isBonusWager && <span className="ml-1 text-amber-400">{activeClue.goForTwo ? 'GO FOR TWO' : 'DAILY DOUBLE'}</span>}
                   </span>
                 </div>
 
@@ -188,6 +199,10 @@ export default function PhoneScreen() {
                   {activeClue.feedbackText}
                 </div>
               </div>
+
+              {activeClue.goForTwo?.stage === 'offer' && activeClue.goForTwo.who === mySeat && (
+                <GoForTwoOffer clue={activeClue} onDecide={decideGoForTwo} />
+              )}
 
               {/* A. Reading Phase -> the buzzer is live but early. Tapping now locks this phone out
                   for a moment (as on TV), so waiting for the light beats tapping over and over. */}
@@ -369,8 +384,13 @@ export default function PhoneScreen() {
             </div>
           )}
 
+          {/* Category draft: strike a column on this phone's turn */}
+          {gameState.status === 'PLAYING' && !activeClue && draft && (
+            <CategoryDraft draft={draft} board={board} contestants={contestants} mine={draftTurn(draft) === mySeat} onStrike={(id) => strikeDraftColumn(id)} />
+          )}
+
           {/* 3. Board Control & Tile Selection for Player 2 */}
-          {gameState.status === 'PLAYING' && !activeClue && currentRound !== 'FINAL_SHOWDOWN' && (
+          {gameState.status === 'PLAYING' && !activeClue && !draft && currentRound !== 'FINAL_SHOWDOWN' && (
             <div className="w-full flex flex-col items-center gap-3">
               {categoryIntro ? (
                 // The round's categories are being revealed: list them as they're read out.
@@ -579,6 +599,16 @@ export default function PhoneScreen() {
                 <Share2 className="w-4 h-4" />
                 <span>SHARE RECAP CARD</span>
               </button>
+              {pickem && (
+                <PickemCard
+                  pickem={pickem}
+                  seat={mySeat}
+                  contestants={contestants}
+                  lineup={activeContestantsList}
+                  onPick={(gameId, team) => setPickemPick(gameId, team)}
+                  onLock={() => setPickemPick(null, null, mySeat, true)}
+                />
+              )}
               <div className="text-xs text-slate-400">Waiting for Host to start rematch...</div>
             </div>
           )}

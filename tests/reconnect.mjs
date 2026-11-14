@@ -37,6 +37,18 @@ const open = async (url, viewport) => {
 };
 
 try {
+  // A phone that gets to a room before the host has opened it keeps looking until it has.
+  {
+    const earlyRoom = `TEST-${Math.floor(1000 + Math.random() * 9000)}`;
+    const early = await open(`${base}?room=${earlyRoom}&role=join`, {width: 390, height: 844});
+    await early.waitForTimeout(1500);
+    const earlyHost = await open(`${base}?room=${earlyRoom}`, {width: 1280, height: 800});
+    await early.waitForSelector('text=/CONNECTED AS PLAYER/', {timeout: 15000});
+    check(true, 'a phone that got there before the host found the room');
+    await early.context().close();
+    await earlyHost.context().close();
+  }
+
   const host = await open(`${base}?board=2x2&room=${room}`, {width: 1280, height: 800});
   await host.click('text=4-Choice');
   await host.locator('label:has-text("This device only hosts") input').check();

@@ -84,6 +84,14 @@ export interface ActiveClueState extends Countdown {
   hintsShown?: number;
   /** What the clue is worth to the player who buzzed in, fixed when they buzzed (it drops as hints appear). */
   stakeAtBuzz?: number;
+  /**
+   * Go for two: after a right answer on a top-dollar tile the player may take a harder follow-up
+   * ('offer' while they decide). The follow-up is played like a Daily Double for the tile's value
+   * ('playing'): right doubles the tile, wrong gives it back.
+   */
+  goForTwo?: {who: ContestantId; stage: 'offer' | 'playing'};
+  /** A right answer here paid the pick-six bonus. */
+  pickSix?: boolean;
 }
 
 export type FinalPhase = 'WAGER' | 'CLUE' | 'RESULTS';
@@ -99,4 +107,30 @@ export interface MatchStats {
   highestScore: number;
   buzzerWins: number;
   bonusWagersHit: number;
+}
+
+/** Category draft: the players strike columns in turn until a normal board is left. */
+export interface CategoryDraftState {
+  round: 'ROUND_1' | 'CHAMPIONSHIP';
+  /** The columns struck so far, in order. */
+  struck: string[];
+  /** How many columns this round's draft strikes. */
+  strikes: number;
+  /** Who strikes, in turn (lowest score first). */
+  order: ContestantId[];
+  turn: number;
+}
+
+/** Whose turn it is to strike a column. */
+export const draftTurn = (d: CategoryDraftState): ContestantId => d.order[d.turn % d.order.length];
+
+/** A person gets this long to strike a column before one is struck for them. */
+export const DRAFT_TURN_MS = 20000;
+
+/** Pick'em at the end of a game: next week's games and each player's picks (team codes). */
+export interface PickemState {
+  week: string;
+  games: import('../triviaEngine').PickemGame[];
+  picks: Partial<Record<ContestantId, Record<string, string>>>;
+  locked: Partial<Record<ContestantId, boolean>>;
 }

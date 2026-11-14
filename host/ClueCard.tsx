@@ -8,6 +8,7 @@ import {isOpenAnswerMode} from '../game/types';
 import {maxDailyDoubleWager, shownClueText, currentWorth, hintCount} from '../game/rules';
 import VoiceAnswerButton, {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {useGame} from '../game/GameContext';
+import GoForTwoOffer from '../ui/GoForTwoOffer';
 
 export default function ClueCard() {
   const {
@@ -26,6 +27,7 @@ export default function ClueCard() {
     dailyDoubleClock,
     hostPlays,
     showToast,
+    decideGoForTwo,
   } = useGame();
   const [, rerender] = useState(0);
   return (
@@ -43,7 +45,7 @@ export default function ClueCard() {
                   <DollarSign className="w-3.5 h-3.5" />
                   {currentWorth(activeClue)}
                   {activeClue.isBonusWager && (
-                    <span className="text-[9px] text-amber-400 font-bold ml-0.5">DAILY DOUBLE</span>
+                    <span className="text-[9px] text-amber-400 font-bold ml-0.5">{activeClue.goForTwo ? 'GO FOR TWO' : 'DAILY DOUBLE'}</span>
                   )}
                 </span>
                 {/* Flag a wrong, unclear or dull question: it won't come up on this device again. */}
@@ -240,6 +242,11 @@ export default function ClueCard() {
             <div className="text-xs sm:text-sm font-bold text-amber-300 mb-3 short:mb-1 min-h-[20px] short:min-h-0">
               {activeClue.feedbackText}
             </div>
+
+            {activeClue.goForTwo?.stage === 'offer' &&
+              ((activeClue.goForTwo.who === 'player' && hostPlays) || (activeClue.goForTwo.who === 'player2' && isTwoPlayerMode && !isClientConnected)) && (
+                <GoForTwoOffer clue={activeClue} onDecide={(yes) => decideGoForTwo(yes, activeClue.goForTwo!.who)} />
+              )}
 
             {/* BUZZER RACE BUTTONS INSIDE CLUE CARD */}
             {!activeClue.isBonusWager && activeClue.phase === 'BUZZER_OPEN' && (
