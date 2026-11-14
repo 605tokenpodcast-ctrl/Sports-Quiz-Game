@@ -162,6 +162,21 @@ answers, plus a link (`?daily=1`) that opens that day's drive.
   total money, best score, Finals right). It shows on the leaderboard, the results and the stream
   screen. **Start new season** on the leaderboard clears it.
 
+## Football rules
+
+- **Football Scoring** (start screen, on by default). **Pick-six:** a right answer right after a
+  rival missed the same clue pays 1.5 times. **Go for two:** a player who gets a top-dollar tile
+  right can take a harder follow-up about the same person (or from the same column). Right doubles
+  the tile, wrong gives it back. AI players never go for two.
+- **Category Draft** (start screen, off by default). Each round deals 3 extra columns (2 in a short
+  game) and the players take turns striking one, lowest score first, on their own phones. AI players
+  strike after a moment, and a person who takes longer than 20 seconds gets one struck for them. Not
+  used with an episode code. Daily Doubles are hidden once the draft is over.
+- **Pick'em carryover.** On the results screen, **Pick'em for next week** shows three of the coming
+  week's games (the night games first). Everyone picks winners on their phone. The next game on that
+  host device starts each player with $500 per right pick, once the Tuesday refresh has the results.
+  Picks are matched by player name and kept for three weeks.
+
 ## Final Showdown
 
 Like on TV, only players with money in the bank play the Final Showdown. Anyone at $0 or

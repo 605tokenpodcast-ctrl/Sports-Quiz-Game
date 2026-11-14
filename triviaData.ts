@@ -269,6 +269,27 @@ export function dailyDriveClues(day: string): QuestionClue[] {
 }
 
 /**
+ * Go for two: a harder follow-up to a clue just answered. First choice is another clue about
+ * the same person (named in it, but not its answer, since that was just revealed); otherwise a
+ * clue from the same column. At least as hard, and nothing on the boards or already played.
+ */
+export function goForTwoClue(clue: QuestionClue, avoid: QuestionClue[], random: () => number = Math.random): QuestionClue | null {
+  const answer = normalizeAnswer(clue.correctAnswer);
+  const avoidIds = new Set(avoid.map((q) => q.id));
+  const avoidAnswers = new Set(avoid.map((q) => normalizeAnswer(q.correctAnswer)));
+  const about = new Set([answer, ...(clue.subjects ?? [])]);
+  const ok = (q: QuestionClue) =>
+    q.id !== clue.id && !avoidIds.has(q.id) && !q.hints?.length && q.difficulty >= clue.difficulty &&
+    normalizeAnswer(q.correctAnswer) !== answer && !avoidAnswers.has(normalizeAnswer(q.correctAnswer));
+  const cats = getActiveCategories().filter((c) => c.id !== 'nfl_custom_column');
+  let pool = cats.flatMap((c) => c.clues).filter((q) => ok(q) && (q.subjects ?? []).some((s) => about.has(s)));
+  if (!pool.length) pool = (cats.find((c) => c.id === clue.categoryId)?.clues ?? []).filter(ok);
+  if (!pool.length) return null;
+  const q = pool[Math.floor(random() * pool.length)];
+  return {...q, isBonusWager: false};
+}
+
+/**
  * Pick a fresh Final Showdown clue that hasn't been used in the current session or recently seen,
  * and whose answer has NOT been used anywhere in this game session.
  */
@@ -320,7 +341,9 @@ export function getFreshFinalShowdownClue(
  */
 export function createFullGameSession(
   difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'EXPERT' = 'MEDIUM',
-  gameLength: GameLength = 'FULL'
+  gameLength: GameLength = 'FULL',
+  /** Extra columns per round for the category draft, struck before the round starts. */
+  extraColumns = 0
 ): {
   round1Board: TriviaCategory[];
   round2Board: TriviaCategory[];
@@ -334,7 +357,7 @@ export function createFullGameSession(
   const usedQuestionIds = new Set<string>();
   const usedAnswers = new Set<string>();
 
-  const categoryCount = BOARD_LAYOUTS[gameLength].categories;
+  const categoryCount = BOARD_LAYOUTS[gameLength].categories + extraColumns;
 
   // Round 2's current column (the season so far) is small, so Round 1 leaves its answers alone.
   const reserved = (getActiveCategories().find((c) => c.id === CURRENT_CATEGORY_IDS.ROUND_2)?.clues ?? [])

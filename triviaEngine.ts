@@ -358,6 +358,25 @@ export interface ExternalBankInfo {
   generatedAt?: string;
 }
 
+/** Pick'em: three of the coming week's games, and recent winners (game id -> team code or TIE). */
+export interface PickemGame {
+  id: string;
+  day: string;
+  label: string;
+  away: string;
+  home: string;
+  awayName: string;
+  homeName: string;
+}
+export interface PickemInfo {
+  week: string;
+  games: PickemGame[];
+  results: Record<string, string>;
+}
+let pickemInfo: PickemInfo | null = null;
+/** The pick'em games and results from the question bank, once it has loaded. */
+export const getPickemInfo = (): PickemInfo | null => pickemInfo;
+
 /**
  * Loads a question bank JSON file and adds its categories to the pool, trying a few times
  * on a flaky connection. Resolves null if it never loads (the game can't deal a full board
@@ -374,6 +393,7 @@ export async function loadExternalQuestionBank(url = 'questions/nfl.json', attem
           if (!known.has(c.id)) EXTERNAL_SPECS.push(c);
         }
         COMPILED_CACHE = null;
+        if (bank.pickem && Array.isArray(bank.pickem.games)) pickemInfo = bank.pickem;
         return { questionCount: bank.questionCount, dataThrough: bank.dataThrough, generatedAt: bank.generatedAt };
       }
     } catch (e) {}

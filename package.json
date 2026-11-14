@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules && npm run -s test:length && npm run -s test:leaderboard && npm run -s test:speech && npm run -s test:options && npm run -s test:bank && npm run -s test:season && npm run -s test:ice && npm run -s test:choices && npm run -s test:episode && npm run -s test:history && npm run -s test:variety && npm run -s test:custom && npm run -s test:big-plays && npm run -s test:daily && npm run -s test:show-notes",
+    "test": "tsc --noEmit -p . && npm run -s test:typed && npm run -s test:voice && npm run -s test:rules && npm run -s test:length && npm run -s test:leaderboard && npm run -s test:speech && npm run -s test:options && npm run -s test:bank && npm run -s test:season && npm run -s test:ice && npm run -s test:choices && npm run -s test:episode && npm run -s test:history && npm run -s test:variety && npm run -s test:custom && npm run -s test:big-plays && npm run -s test:daily && npm run -s test:show-notes && npm run -s test:football && npm run -s test:pickem",
     "dev": "vite",
     "build": "vite build",
     "questions": "tsx scripts/build-nfl-questions.ts",
@@ -25,7 +25,8 @@
     "test:reconnect": "node tests/reconnect.mjs",
     "test:host-reload": "node tests/host-reload.mjs",
     "test:stream-extras": "node tests/stream-extras.mjs",
-    "test:browser": "npm run -s test:game && npm run -s test:host-only && npm run -s test:reconnect && npm run -s test:host-reload && npm run -s test:group-history && npm run -s test:read-aloud && npm run -s test:phone-fit && npm run -s test:stream-extras",
+    "test:draft": "node tests/draft.mjs",
+    "test:browser": "npm run -s test:game && npm run -s test:host-only && npm run -s test:reconnect && npm run -s test:host-reload && npm run -s test:group-history && npm run -s test:read-aloud && npm run -s test:phone-fit && npm run -s test:stream-extras && npm run -s test:draft",
     "test:ice": "tsx tests/ice-servers.ts",
     "test:choices": "tsx tests/wrong-choices.ts",
     "test:episode": "tsx tests/episode.ts",
@@ -35,7 +36,9 @@
     "test:custom": "tsx tests/custom-column.ts",
     "test:big-plays": "tsx tests/big-plays.ts",
     "test:daily": "tsx tests/daily-drive.ts",
-    "test:show-notes": "tsx tests/show-notes.ts"
+    "test:show-notes": "tsx tests/show-notes.ts",
+    "test:football": "tsx tests/football-scoring.ts",
+    "test:pickem": "tsx tests/pickem.ts"
   },
   "keywords": [],
   "author": "",

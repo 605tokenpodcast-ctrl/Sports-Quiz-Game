@@ -23,7 +23,11 @@ import {
   ExternalBankInfo,
   QuestionClue,
   TriviaCategory,
+  goForTwoClue,
+  BOARD_LAYOUTS,
+  getPickemInfo,
 } from '../triviaData';
+import {aiPicks, clearSavedPicks, loadSavedPicks, pickemPayouts, PICKEM_BONUS, savePicks, type PickemPayout, type SavedPicks} from '../utils/pickem';
 import {useWakeLock} from '../utils/wakeLock';
 import {newEpisodeCode, normalizeEpisodeCode, episodeLength, seededRandom} from '../utils/episode';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
@@ -66,6 +70,10 @@ import {
   RemoteSeat,
   RoundType,
   seatLabel,
+  CategoryDraftState,
+  PickemState,
+  draftTurn,
+  DRAFT_TURN_MS,
 } from './types';
 import {
   aiDailyDoubleWager,
@@ -75,6 +83,9 @@ import {
   clampDailyDoubleWager,
   clampFinalWager,
   clueStake,
+  earnsGoForTwo,
+  placeDailyDoubles,
+  pickSixPayout,
   clueTimeUp,
   countdownForSync,
   countdownFromSync,
@@ -304,6 +315,56 @@ export function useGameController() {
       // Private browsing: the setting just isn't remembered.
     }
   }, []);
+
+  // Football scoring: pick-six (1.5x for a right answer after someone else's miss) and go for two
+  // (a harder follow-up after a right answer on a top-dollar tile). On unless the host turns it off.
+  const [footballRules, setFootballRulesState] = useState(() => {
+    try {
+      return localStorage.getItem('football_rules') !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const footballRulesRef = useRef(footballRules);
+  footballRulesRef.current = footballRules;
+  const setFootballRules = useCallback((on: boolean) => {
+    setFootballRulesState(on);
+    try {
+      localStorage.setItem('football_rules', on ? 'on' : 'off');
+    } catch {}
+  }, []);
+  // Category draft: each round deals a few extra columns and the players take turns striking
+  // them until a normal board is left. Off unless the host turns it on.
+  const [categoryDraft, setCategoryDraftState] = useState(() => {
+    try {
+      return localStorage.getItem('category_draft') === 'on';
+    } catch {
+      return false;
+    }
+  });
+  const setCategoryDraft = useCallback((on: boolean) => {
+    setCategoryDraftState(on);
+    try {
+      localStorage.setItem('category_draft', on ? 'on' : 'off');
+    } catch {}
+  }, []);
+  const [draft, setDraft] = useState<CategoryDraftState | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  // Host: how many columns a drafted round keeps (more than that means the draft hasn't run yet).
+  const draftKeepRef = useRef(0);
+
+  // Pick'em carryover: picks for next week's games at the end of a game, paid out at the start
+  // of the next one (utils/pickem.ts).
+  const [pickem, setPickem] = useState<PickemState | null>(null);
+  const pickemRef = useRef(pickem);
+  pickemRef.current = pickem;
+  const [pickemResult, setPickemResult] = useState<PickemPayout[] | null>(null);
+  // Host: true once this match has paid out (or had nothing to pay). A resumed game never pays.
+  const pickemPaidRef = useRef(true);
+
+  // Host: the follow-up waiting while a player decides whether to go for two (kept off the synced state).
+  const goForTwoRef = useRef<{clue: QuestionClue; stake: number} | null>(null);
 
   // How fast the host voice reads. Set on the host, and passed to the stream screen.
   const [voiceSpeed, setVoiceSpeedState] = useState<VoiceSpeed>(() => getVoiceSpeed());
@@ -747,43 +808,29 @@ export function useGameController() {
     stumperSavedRef.current = false;
     // With an episode code every pick (columns, clues, Daily Doubles, the Final) comes from the code.
     const random = episodeCode ? seededRandom(`${episodeCode}|${bankInfo?.dataThrough ?? ''}`) : Math.random;
-    const session = dealWith(episodeCode ? random : null, () => createFullGameSession(difficulty, gameLength));
+    // The draft deals 3 extra columns a round (2 in a short game). Not with an episode code,
+    // which promises everyone the same boards.
+    const extra = categoryDraft && !episodeCode ? (gameLength === 'FULL' ? 3 : 2) : 0;
+    const session = dealWith(episodeCode ? random : null, () => createFullGameSession(difficulty, gameLength, extra));
     const r1 = session.round1Board;
     const r2 = session.round2Board;
-    const r1Rows = r1[0]?.clues.length || 5;
-    const r2Rows = r2[0]?.clues.length || 5;
 
-    // 1 Daily Double hidden in Round 1
-    const r1Cat = Math.floor(random() * r1.length);
-    const r1Clue = Math.floor(random() * r1Rows);
-    if (r1[r1Cat]?.clues[r1Clue]) {
-      r1[r1Cat].clues[r1Clue].isBonusWager = true;
-    }
-
-    // Daily Doubles hidden in Round 2, in different categories
-    const bonus1Cat = Math.floor(random() * r2.length);
-    const bonus1Clue = Math.floor(random() * r2Rows);
-    if (r2[bonus1Cat]?.clues[bonus1Clue]) {
-      r2[bonus1Cat].clues[bonus1Clue].isBonusWager = true;
-    }
-
-    if (gameLength === 'FULL') {
-      let bonus2Cat = Math.floor(random() * r2.length);
-      let bonus2Clue = Math.floor(random() * r2Rows);
-      if (bonus2Cat === bonus1Cat && bonus2Clue === bonus1Clue) {
-        bonus2Cat = (bonus1Cat + 2) % r2.length;
-      }
-      if (r2[bonus2Cat]?.clues[bonus2Clue]) {
-        r2[bonus2Cat].clues[bonus2Clue].isBonusWager = true;
-      }
+    // Daily Doubles: 1 in Round 1, 2 in Round 2 (1 in a short game). A drafted round gets its
+    // Daily Doubles once the draft is over, so none is struck with its column.
+    if (!extra) {
+      placeDailyDoubles(r1, 1, random);
+      placeDailyDoubles(r2, gameLength === 'FULL' ? 2 : 1, random);
     }
 
     // Development only: ?board=2x2 plays a tiny board (2 categories of 2 clues) for quick tests.
     const params = new URLSearchParams(window.location.search);
     const small = import.meta.env.DEV && params.get('board')?.match(/^(\d)x(\d)$/);
+    draftKeepRef.current = extra ? (small ? +small[1] : BOARD_LAYOUTS[gameLength].categories) : 0;
+    setDraft(null);
     const shrink = (board: TriviaCategory[]) => {
       if (!small) return board;
-      const out = board.slice(0, +small[1]).map((cat) => ({...cat, clues: cat.clues.slice(0, +small[2])}));
+      const out = board.slice(0, +small[1] + extra).map((cat) => ({...cat, clues: cat.clues.slice(0, +small[2])}));
+      if (extra) return out;
       const last = out[0]?.clues[out[0].clues.length - 1];
       for (const cat of out) for (const q of cat.clues) q.isBonusWager = false;
       // Daily Double on the last tile of the first category, unless &dd=0.
@@ -798,7 +845,7 @@ export function useGameController() {
     // Set Final Clue from deduplicated session
     setFinalClue(session.finalClue);
     setSeenCountRefresh((c) => c + 1);
-  }, [difficulty, gameLength, episodeCode, bankInfo]);
+  }, [difficulty, gameLength, episodeCode, bankInfo, categoryDraft]);
 
   // AI reflex and accuracy configuration
   const aiConfig = useMemo(() => aiSettings(difficulty), [difficulty]);
@@ -849,7 +896,7 @@ export function useGameController() {
   // Open a clue card (authoritative selection on host)
   const selectClue = useCallback(
     (categoryIndex: number, clueIndex: number, pickerId: ContestantId = activeSelector) => {
-      if (activeClue || categoryIntroRef.current) return;
+      if (activeClue || categoryIntroRef.current || draftRef.current) return;
       const board = currentRound === 'ROUND_1' ? round1Board : round2Board;
       const clue = board[categoryIndex]?.clues[clueIndex];
       if (!clue || answeredClueIds.has(clue.id)) return;
@@ -1029,6 +1076,10 @@ export function useGameController() {
     setAwaySeats({});
     introducedRoundsRef.current = new Set();
     setCategoryIntro(null);
+    setDraft(null);
+    setPickem(null);
+    setPickemResult(null);
+    pickemPaidRef.current = false;
     pendingFinalRef.current = null;
     setFinalReveal(null);
     setGameState((prev) => ({...prev, status: 'PLAYING', score: 0, level: 1}));
@@ -1084,6 +1135,7 @@ export function useGameController() {
     setFinalOptions(g.currentRound === 'FINAL_SHOWDOWN' && g.finalClue ? generateOptions(g.finalClue, g.answerMode) : []);
     introducedRoundsRef.current = new Set(g.introducedRounds);
     setCategoryIntro(null);
+    setDraft(null);
     pendingFinalRef.current = null;
     setFinalReveal(null);
     setGameState((prev) => ({...prev, status: 'PLAYING', score: next.player.score}));
@@ -1222,17 +1274,21 @@ export function useGameController() {
     const prev = activeClueRef.current;
     if (!prev || prev.phase !== 'ANSWERING' || prev.buzzedContestantId !== who) return;
     const stake = clueStake(prev);
+    const pickSix = correct && footballRulesRef.current ? pickSixPayout(prev, stake) : null;
+    const payout = pickSix ?? stake;
+    // A go-for-two follow-up is played like a Daily Double but doesn't count as one.
+    const dailyDouble = prev.isBonusWager && !prev.goForTwo;
 
     if (correct) {
       gameAudio.playCoinPickup();
-      if (prev.isBonusWager && how.kind === 'player') {
+      if (dailyDouble && how.kind === 'player') {
         gameAudio.playLevelUpStinger();
         setMatchStats((ms) => ({...ms, bonusWagersHit: ms.bonusWagersHit + 1}));
       }
       // Whoever answers correctly gets control of the board.
       setActiveSelector(who);
       setBigPlay((b) =>
-        b && b.amount >= stake ? b : {who, amount: stake, dailyDouble: prev.isBonusWager, category: prev.clue.category}
+        b && b.amount >= payout ? b : {who, amount: payout, dailyDouble, category: prev.clue.category}
       );
     } else {
       gameAudio.playErrorBuzz();
@@ -1241,23 +1297,89 @@ export function useGameController() {
       const before = contestantsRef.current.player.score;
       setMatchStats((ms) =>
         correct
-          ? {...ms, playerCorrect: ms.playerCorrect + 1, highestScore: Math.max(ms.highestScore, before + stake)}
+          ? {...ms, playerCorrect: ms.playerCorrect + 1, highestScore: Math.max(ms.highestScore, before + payout)}
           : {...ms, playerWrong: ms.playerWrong + 1}
       );
     }
     // Daily Doubles have no buzz race, so they don't count toward Quick Draw.
     const awardHow = {buzzMs: prev.isBonusWager ? undefined : prev.buzzMs, byVoice: how.kind === 'player' && how.byVoice};
     setContestants((c) =>
-      updateStreaks({...c, [who]: trackAnswer(scoreAnswer(c[who], stake, correct, prev.isBonusWager), correct, prev.clue, awardHow)}, who, correct)
+      updateStreaks({...c, [who]: trackAnswer(scoreAnswer(c[who], payout, correct, dailyDouble), correct, prev.clue, awardHow)}, who, correct)
     );
 
     const name = contestantsRef.current[who]?.name || (how.kind === 'ai' ? 'Opponent' : 'Player');
     const logged = clueLogRef.current.find((c) => c.id === prev.clue.id);
     if (logged) (correct ? logged.right : logged.wrong).push(name);
-    commitClue(resolveAnswer(prev, who, correct, how, {name, buzzerSeats, now: Date.now()}));
+    let next = resolveAnswer(prev, who, correct, how, {name, buzzerSeats, now: Date.now()});
+    if (pickSix) {
+      gameAudio.playLevelUpStinger();
+      next = {...next, pickSix: true, feedbackText: `🏈 PICK-SIX! ${name} jumped on the miss for +$${pickSix.toLocaleString()}!`};
+    }
+    if (correct && footballRulesRef.current && earnsGoForTwo(prev, roundMaxClue, isHumanSeat(who))) {
+      const played = clueLogRef.current.map((c) => ({id: c.id, correctAnswer: c.answer}) as QuestionClue);
+      const followUp = goForTwoClue(prev.clue, [...round1Board, ...round2Board].flatMap((c) => c.clues).concat(played));
+      if (followUp) {
+        goForTwoRef.current = {clue: followUp, stake};
+        next = {
+          ...next,
+          ...startCountdown(TIMES.goForTwoOffer, Date.now()),
+          goForTwo: {who, stage: 'offer'},
+          feedbackText: `${next.feedbackText} GO FOR TWO? A harder follow-up for $${stake.toLocaleString()}: right doubles it, wrong gives it back.`,
+        };
+      }
+    }
+    commitClue(next);
   };
   const applyAnswerRef = useRef(applyAnswer);
   applyAnswerRef.current = applyAnswer;
+
+  // Go for two: the player who earned it says yes or no. A phone asks the host.
+  const decideGoForTwo = (accept: boolean, seat: ContestantId = 'player') => {
+    if (deviceRole === 'CLIENT') {
+      p2pRef.current?.send({type: 'CLIENT_GO_FOR_TWO', accept});
+      return;
+    }
+    if (deviceRole !== 'HOST') return;
+    const prev = activeClueRef.current;
+    if (!prev || prev.goForTwo?.stage !== 'offer' || prev.goForTwo.who !== seat) return;
+    const offer = goForTwoRef.current;
+    goForTwoRef.current = null;
+    const now = Date.now();
+    if (!accept || !offer) {
+      // Back to the board right away.
+      commitClue({...prev, ...startCountdown(0.4, now), goForTwo: undefined});
+      return;
+    }
+    gameAudio.playPowerupChime();
+    setAnsweredClueIds((ids) => new Set([...ids, prev.clue.id]));
+    setMatchStats((ms) => ({...ms, totalQuestions: ms.totalQuestions + 1}));
+    const clue = {...offer.clue, value: offer.stake};
+    const name = contestantsRef.current[seat]?.name || seatLabel(seat);
+    setContestants((c) => ({...c, [seat]: {...c[seat], reaction: 'answering'}}));
+    commitClue({
+      ...prev,
+      ...dailyDoubleClock(clue, now),
+      clue,
+      phase: 'ANSWERING',
+      buzzedContestantId: seat,
+      buzzMs: undefined,
+      buzzerLockout: {coach: false, player: false, analyst: false, player2: false},
+      options: generateOptions(clue, answerMode),
+      isBonusWager: true,
+      bonusSelectingPlayerId: seat,
+      bonusWagerInput: offer.stake,
+      bonusWagerLocked: true,
+      selectedOption: null,
+      typedInput: '',
+      hintsShown: undefined,
+      stakeAtBuzz: undefined,
+      pickSix: undefined,
+      goForTwo: {who: seat, stage: 'playing'},
+      feedbackText: `🏈 GOING FOR TWO! ${name} plays a harder follow-up for $${offer.stake.toLocaleString()}.`,
+    });
+  };
+  const decideGoForTwoRef = useRef(decideGoForTwo);
+  decideGoForTwoRef.current = decideGoForTwo;
 
   // Host: a person answered (Player 1 here, or a friend's phone).
   const handleContestantSubmitAnswer = (answer: string, answeringId: 'player' | RemoteSeat, spokenGuesses?: string[]) => {
@@ -1388,6 +1510,18 @@ export function useGameController() {
         switch (msg.type) {
           case 'CLIENT_REACTION':
             if (isReactionEmoji(msg.emoji)) showReaction(msg.emoji, seat);
+            break;
+
+          case 'CLIENT_GO_FOR_TWO':
+            decideGoForTwoRef.current(Boolean(msg.accept), seat);
+            break;
+
+          case 'CLIENT_PICKEM':
+            setPickemPickRef.current(msg.gameId, msg.team, seat, Boolean(msg.lockIn));
+            break;
+
+          case 'CLIENT_DRAFT_STRIKE':
+            strikeDraftColumnRef.current(String(msg.categoryId), seat);
             break;
 
           case 'CLIENT_BUZZ': {
@@ -1531,6 +1665,9 @@ export function useGameController() {
           if (s.lineup) setSyncedLineup(s.lineup);
           if (s.bigPlay !== undefined) setBigPlay(s.bigPlay);
           if (s.categoryIntro !== undefined) setCategoryIntro(s.categoryIntro);
+          if (s.draft !== undefined) setDraft(s.draft);
+          if (s.pickem !== undefined) setPickem(s.pickem);
+          if (s.pickemResult !== undefined) setPickemResult(s.pickemResult);
           if (s.finalReveal !== undefined) setFinalReveal(s.finalReveal);
           if (s.aiPickingTile !== undefined) setAiPickingTile(s.aiPickingTile);
           if (s.aiThinkingStatus !== undefined) setAiThinkingStatus(s.aiThinkingStatus);
@@ -1693,10 +1830,16 @@ export function useGameController() {
         aiPickingTile,
         aiThinkingStatus,
         categoryIntro,
+        draft,
+        pickem,
+        pickemResult,
         finalReveal,
       },
     });
   }, [
+    draft,
+    pickem,
+    pickemResult,
     deviceRole,
     gameState,
     currentRound,
@@ -1724,6 +1867,7 @@ export function useGameController() {
       gameState.status !== 'PLAYING' ||
       activeClue ||
       categoryIntro ||
+      draft ||
       currentRound === 'FINAL_SHOWDOWN' ||
       isGameMenuOpen ||
       isHowToPlayOpen ||
@@ -1823,11 +1967,70 @@ export function useGameController() {
   useEffect(() => {
     if (deviceRole !== 'HOST' || gameState.status !== 'PLAYING' || !readAloud || !currentBoard.length) return;
     if (currentRound !== 'ROUND_1' && currentRound !== 'CHAMPIONSHIP') return;
-    if (introducedRoundsRef.current.has(currentRound) || activeClue) return;
+    if (introducedRoundsRef.current.has(currentRound) || activeClue || draft) return;
+    if (draftKeepRef.current && currentBoard.length > draftKeepRef.current) return;
     introducedRoundsRef.current.add(currentRound);
     setCategoryIntro({round: currentRound, shown: 0});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceRole, gameState.status, readAloud, currentRound, currentBoard.length]);
+  }, [deviceRole, gameState.status, readAloud, currentRound, currentBoard.length, draft]);
+
+  // Category draft: a round dealt with extra columns opens with the players striking them, lowest
+  // score first, one column a turn, until a normal board is left.
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || gameState.status !== 'PLAYING' || draft || activeClue) return;
+    if (currentRound !== 'ROUND_1' && currentRound !== 'CHAMPIONSHIP') return;
+    const keep = draftKeepRef.current;
+    if (!keep || currentBoard.length <= keep) return;
+    const order = [...activeContestantsList].sort((a, b) => contestants[a].score - contestants[b].score);
+    const next = {round: currentRound, struck: [], strikes: currentBoard.length - keep, order, turn: 0};
+    draftRef.current = next;
+    setDraft(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, gameState.status, currentRound, currentBoard.length, draft, activeClue]);
+
+  const strikeDraftColumn = (categoryId: string, seat: ContestantId = 'player') => {
+    if (deviceRole === 'CLIENT') {
+      p2pRef.current?.send({type: 'CLIENT_DRAFT_STRIKE', categoryId});
+      return;
+    }
+    if (deviceRole !== 'HOST') return;
+    const d = draftRef.current;
+    if (!d || draftTurn(d) !== seat || d.struck.includes(categoryId) || categoryId === 'nfl_custom_column') return;
+    const board = d.round === 'ROUND_1' ? round1Board : round2Board;
+    if (!board.some((c) => c.id === categoryId)) return;
+    gameAudio.playErrorBuzz();
+    const struck = [...d.struck, categoryId];
+    if (struck.length < d.strikes) {
+      const next = {...d, struck, turn: d.turn + 1};
+      draftRef.current = next;
+      setDraft(next);
+      return;
+    }
+    const kept = board.filter((c) => !struck.includes(c.id)).map((c) => ({...c, clues: c.clues.map((q) => ({...q, isBonusWager: false}))}));
+    placeDailyDoubles(kept, d.round === 'ROUND_1' ? 1 : gameLength === 'FULL' ? 2 : 1, Math.random);
+    (d.round === 'ROUND_1' ? setRound1Board : setRound2Board)(kept);
+    draftRef.current = null;
+    setDraft(null);
+    gameAudio.playConfirmSelect();
+    showToast('🏈 Draft is in. Let\'s play!');
+  };
+  const strikeDraftColumnRef = useRef(strikeDraftColumn);
+  strikeDraftColumnRef.current = strikeDraftColumn;
+
+  // AI players strike after a moment; a person who doesn't pick in time gets a column struck for them.
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || !draft || clocksPaused) return;
+    const who = draftTurn(draft);
+    const timer = setTimeout(() => {
+      const d = draftRef.current;
+      if (!d || d.turn !== draft.turn) return;
+      const board = d.round === 'ROUND_1' ? round1Board : round2Board;
+      const open = board.filter((c) => !d.struck.includes(c.id) && c.id !== 'nfl_custom_column');
+      if (open.length) strikeDraftColumnRef.current(open[Math.floor(Math.random() * open.length)].id, who);
+    }, isHumanSeat(who) ? DRAFT_TURN_MS : 1800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, draft, clocksPaused]);
 
   useEffect(() => {
     if (deviceRole !== 'HOST' || !categoryIntro || clocksPaused) return;
@@ -2036,7 +2239,7 @@ export function useGameController() {
     if (phase === 'READING') {
       speak(spokenClue(clue, shownClueText(activeClue)), () => openBuzzersAfterReadingRef.current(clue.id));
     } else if (phase === 'ANSWERING' && activeClue.isBonusWager) {
-      if (activeClue.bonusWagerLocked) speak([{text: 'Here is your Daily Double.', hype: true}, clue.clue]);
+      if (activeClue.bonusWagerLocked) speak([{text: activeClue.goForTwo ? 'Going for two!' : 'Here is your Daily Double.', hype: true}, clue.clue]);
     } else if (phase === 'ANSWERING') {
       stopSpeaking();
     } else if (phase === 'REVEALED' && clue.correctAnswer) {
@@ -2198,7 +2401,7 @@ export function useGameController() {
       setSavedGame(null);
       return;
     }
-    if (gameState.status !== 'PLAYING' || activeClue || !round1Board.length) return;
+    if (gameState.status !== 'PLAYING' || activeClue || draft || !round1Board.length) return;
     if (currentRound === 'RESULTS' || (currentRound === 'FINAL_SHOWDOWN' && finalShowdownPhase !== 'WAGER')) return;
     const phoneSeats: Partial<Record<RemoteSeat, string>> = {...awaySeats};
     for (const seat of Object.values(remoteSeats) as RemoteSeat[]) phoneSeats[seat] = contestants[seat].name;
@@ -2563,6 +2766,92 @@ export function useGameController() {
     showToast(copied ? '✓ Show notes copied and saved to your downloads' : '✓ Show notes saved to your downloads');
   }, [activeContestantsList, contestants, difficulty, gameLength, answerMode, episodeCode, showToast]);
 
+  // Pick'em: the host opens next week's picks on the results screen. AI players pick right away.
+  const pickemName = (id: ContestantId) => (contestantsRef.current[id]?.name || '').replace(/\s*\(P\d\)$/, '').trim().toLowerCase();
+  const openPickem = () => {
+    if (deviceRole !== 'HOST') return;
+    const info = getPickemInfo();
+    if (!info?.games.length) {
+      showToast('No games to pick yet. Pick\'em comes back with the next weekly question refresh.');
+      return;
+    }
+    const picks: PickemState['picks'] = {};
+    const locked: PickemState['locked'] = {};
+    for (const id of activeContestantsList) {
+      if (isHumanSeat(id)) continue;
+      picks[id] = aiPicks(info.games);
+      locked[id] = true;
+    }
+    setPickem({week: info.week, games: info.games, picks, locked});
+  };
+  const savePickem = (state: PickemState) => {
+    const picks: SavedPicks['picks'] = {};
+    for (const [id, p] of Object.entries(state.picks) as [ContestantId, Record<string, string>][]) {
+      if (p && Object.keys(p).length) picks[pickemName(id)] = p;
+    }
+    savePicks({week: state.week, savedAt: Date.now(), games: state.games, picks});
+    setPickem(null);
+    gameAudio.playConfirmSelect();
+    showToast(`🏈 Pick'em locked for ${state.week || 'next week'}. Right picks pay $${PICKEM_BONUS} each next game.`);
+  };
+  /** A player picks a winner, or locks their picks. A phone asks the host. */
+  const setPickemPick = (gameId: string | null, team: string | null, seat: ContestantId = 'player', lockIn = false) => {
+    if (deviceRole === 'CLIENT') {
+      p2pRef.current?.send({type: 'CLIENT_PICKEM', gameId, team, lockIn});
+      return;
+    }
+    const cur = pickemRef.current;
+    if (deviceRole !== 'HOST' || !cur || cur.locked[seat]) return;
+    let next = cur;
+    if (gameId && team) {
+      const game = cur.games.find((g) => g.id === gameId);
+      if (!game || (team !== game.home && team !== game.away)) return;
+      next = {...cur, picks: {...cur.picks, [seat]: {...cur.picks[seat], [gameId]: team}}};
+    }
+    if (lockIn) {
+      if (Object.keys(next.picks[seat] ?? {}).length < next.games.length) return;
+      next = {...next, locked: {...next.locked, [seat]: true}};
+    }
+    pickemRef.current = next;
+    if (activeContestantsList.every((id) => next.locked[id])) savePickem(next);
+    else setPickem(next);
+  };
+  const setPickemPickRef = useRef(setPickemPick);
+  setPickemPickRef.current = setPickemPick;
+  /** Host: save the picks made so far (anyone who hasn't picked sits this week out). */
+  const finishPickem = () => {
+    if (deviceRole === 'HOST' && pickemRef.current) savePickem(pickemRef.current);
+  };
+
+  // Host: a new match pays out last episode's right picks as starting money, once the results are in.
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || gameState.status !== 'PLAYING' || pickemPaidRef.current) return;
+    pickemPaidRef.current = true;
+    const saved = loadSavedPicks();
+    const info = getPickemInfo();
+    if (!saved || !info) return;
+    const payouts = pickemPayouts(saved, info.results);
+    if (!payouts) return;
+    clearSavedPicks();
+    const seatOf = (name: string) => activeContestantsList.find((id) => pickemName(id) === name);
+    const paid = payouts.filter((p) => p.bonus > 0 && seatOf(p.name));
+    setContestants((c) => {
+      const next = {...c};
+      for (const p of paid) {
+        const id = seatOf(p.name)!;
+        next[id] = {...next[id], score: next[id].score + p.bonus};
+      }
+      return next;
+    });
+    const shown = payouts.filter((p) => seatOf(p.name)).map((p) => ({...p, name: contestantsRef.current[seatOf(p.name)!].name}));
+    if (shown.length) {
+      setPickemResult(shown);
+      if (paid.length) gameAudio.playCoinPickup();
+      setTimeout(() => setPickemResult(null), 9000);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, gameState.status]);
+
   // Copy Room Link to Clipboard
   const handleCopyInviteLink = useCallback(() => {
     navigator.clipboard
@@ -2769,6 +3058,18 @@ export function useGameController() {
     recapAwardsList,
     shareRecap,
     exportShowNotes,
+    footballRules,
+    setFootballRules,
+    decideGoForTwo,
+    categoryDraft,
+    setCategoryDraft,
+    draft,
+    strikeDraftColumn,
+    pickem,
+    pickemResult,
+    openPickem,
+    setPickemPick,
+    finishPickem,
     handleContestantBuzz,
     handleContestantSubmitAnswer,
     confirmFinalWagers,

@@ -4,6 +4,7 @@ import {MenuOverlay} from '../utils/helper';
 import {AnswerFormat, TriviaTier} from '../utils/leaderboard';
 import {IMG_TROPHY, SeasonTable} from '../ui/shared';
 import {useGame} from '../game/GameContext';
+import {PickemCard} from '../ui/Pickem';
 
 export default function ResultsOverlay() {
   const {
@@ -23,6 +24,11 @@ export default function ResultsOverlay() {
     recapAwardsList,
     shareRecap,
     exportShowNotes,
+    pickem,
+    openPickem,
+    setPickemPick,
+    finishPickem,
+    hostPlays,
     seasonRows,
     episodeCode,
   } = useGame();
@@ -172,6 +178,25 @@ export default function ResultsOverlay() {
                 <FileText className="w-4 h-4" />
                 <span>SHOW NOTES (every clue + stumper)</span>
               </button>
+
+              {pickem ? (
+                <PickemCard
+                  pickem={pickem}
+                  seat={hostPlays ? 'player' : null}
+                  contestants={contestants}
+                  lineup={activeContestantsList}
+                  onPick={(gameId, team) => setPickemPick(gameId, team, 'player')}
+                  onLock={() => setPickemPick(null, null, 'player', true)}
+                  onSave={finishPickem}
+                />
+              ) : (
+                <button
+                  onClick={openPickem}
+                  data-open-pickem
+                  className="min-w-[48px] min-h-[44px] w-full py-2 rounded-full border border-emerald-500/70 bg-slate-950/70 hover:border-emerald-300 text-emerald-200 font-black text-xs sm:text-sm flex items-center justify-center gap-2">
+                  <span>🏈 PICK'EM FOR NEXT WEEK</span>
+                </button>
+              )}
 
               {episodeCode && (
                 <div className="w-full rounded-xl border border-amber-500/60 bg-slate-950/80 px-3 py-2 text-center">

@@ -19,9 +19,13 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('dialog', (d) => d.accept());
   // A slow question bank: the game must not start until it's in, or Round 2 has no board.
+  // It also gets results for the pick'em games (every home team wins), to test the payout.
   await page.route('**/questions/nfl.json', async (route) => {
     await new Promise((r) => setTimeout(r, 2500));
-    await route.continue();
+    const res = await route.fetch();
+    const bank = await res.json();
+    for (const g of bank.pickem?.games ?? []) bank.pickem.results[g.id] = g.home;
+    await route.fulfill({response: res, json: bank});
   });
   await page.goto('http://127.0.0.1:5199/?board=2x2');
   await page.click('text=4-Choice');
@@ -51,6 +55,9 @@ try {
     for (const label of ['ROUND 1', 'ROUND 2', 'FINAL SHOWDOWN', 'DAILY DOUBLE']) if (body.includes(label)) seen.add(label.toLowerCase());
     if (await tap('button:has-text("LOCK IN WAGER & REVEAL CLUE")', body.includes('DAILY DOUBLE') ? 'daily double wager' : 'final wager')) continue;
     if (await tap('button:has-text("BUZZ IN NOW")', 'buzz')) continue;
+    if (body.includes('PICK-SIX')) seen.add('pick-six');
+    if (body.includes('GOING FOR TWO')) seen.add('go for two follow-up');
+    if (await tap('[data-go-for-two] button:has-text("Go for two")', 'go for two')) continue;
     // Answer buttons, in clues and in the Final, start with a letter badge.
     const choice = 'button:has(span:text-matches("^[A-H]$"))';
     if (await visible('button:has-text("SUBMIT FINAL ANSWER")')) {
@@ -75,6 +82,20 @@ try {
     if (process.env.DUMP_NOTES) console.log(notes);
     console.log(ok ? `ok   show notes download (${notes.split('\n- ').length - 1} clues listed)` : 'FAIL show notes did not download');
     if (!ok) failed = true;
+
+    // Pick'em: pick every home team, lock, and the next game starts with $500 a right pick.
+    await page.click('[data-open-pickem]');
+    const games = await page.locator('[data-pickem] button:has-text("(home)")').count();
+    for (let i = 0; i < games; i++) await page.locator('[data-pickem] button:has-text("(home)")').nth(i).click();
+    await page.click('[data-pickem] button:has-text("Lock my picks")');
+    const saved = await page.evaluate(() => localStorage.getItem('sports_arena_pickem_v1'));
+    const pickOk = games === 3 && saved && (await page.locator('[data-pickem]').count()) === 0;
+    console.log(pickOk ? 'ok   pick\'em: 3 games picked and saved' : `FAIL pick'em did not save (${games} games)`);
+    await page.click('text=PLAY AGAIN');
+    const banner = await page.waitForSelector('[data-pickem-payout]', {timeout: 8000}).then((el) => el.innerText()).catch(() => '');
+    const paidOk = /3 of 3 right\s*\+\$1,500/.test(banner);
+    console.log(paidOk ? 'ok   the next game pays the right picks (+$1,500)' : `FAIL pick'em payout: ${banner.replace(/\n/g, ' ')}`);
+    if (!pickOk || !paidOk) failed = true;
   }
   for (const step of ['round 2', 'daily double', 'buzz', 'answer', 'final wager', 'final submit']) {
     if (!seen.has(step)) console.log(`FAIL never saw: ${step}`);

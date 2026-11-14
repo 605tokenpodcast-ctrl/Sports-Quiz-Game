@@ -46,6 +46,10 @@ export default function StartMenu() {
     startButtonRef,
     openLeaderboardWithConfig,
     readAloud,
+    footballRules,
+    setFootballRules,
+    categoryDraft,
+    setCategoryDraft,
     setReadAloud,
     voiceSpeed,
     setVoiceSpeed,
@@ -351,6 +355,40 @@ export default function StartMenu() {
                 ))}
               </div>
             </div>
+
+            {/* Football scoring: pick-six and go for two */}
+            <button
+              onClick={() => {
+                gameAudio.playCrispClick();
+                setFootballRules(!footballRules);
+              }}
+              data-football-rules={footballRules ? 'on' : 'off'}
+              className={`w-full mb-3 min-h-[44px] py-2 px-3 rounded-lg border flex items-center gap-2 text-left transition-all ${
+                footballRules ? 'bg-emerald-700 text-white border-emerald-400 shadow-md' : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-emerald-500'
+              }`}>
+              <span className="text-base">🏈</span>
+              <span className="flex flex-col">
+                <span className="text-xs font-bold">Football Scoring: {footballRules ? 'On' : 'Off'}</span>
+                <span className="text-[9px] opacity-80">Pick-six pays 1.5x after a rival's miss; go for two on top-dollar tiles</span>
+              </span>
+            </button>
+
+            {/* Category draft */}
+            <button
+              onClick={() => {
+                gameAudio.playCrispClick();
+                setCategoryDraft(!categoryDraft);
+              }}
+              data-category-draft={categoryDraft ? 'on' : 'off'}
+              className={`w-full mb-3 min-h-[44px] py-2 px-3 rounded-lg border flex items-center gap-2 text-left transition-all ${
+                categoryDraft ? 'bg-emerald-700 text-white border-emerald-400 shadow-md' : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:border-emerald-500'
+              }`}>
+              <span className="text-base">📋</span>
+              <span className="flex flex-col">
+                <span className="text-xs font-bold">Category Draft: {categoryDraft ? 'On' : 'Off'}</span>
+                <span className="text-[9px] opacity-80">Each round deals extra columns; players take turns striking them</span>
+              </span>
+            </button>
 
             {/* Read clues aloud */}
             {isSpeechSupported && (

@@ -102,7 +102,8 @@ try {
     for (let k = 0; k < phones.length && !acted; k++) {
       const p = phones[(turn + k) % phones.length];
       const label = `P${((turn + k) % phones.length) + 1}`;
-      if (await tap(p, 'button:has-text("CONFIRM $")')) acted = seen.add(`${label} daily double`);
+      if (await tap(p, '[data-go-for-two] button:has-text("Go for two")')) acted = seen.add(`${label} go for two`);
+      else if (await tap(p, 'button:has-text("CONFIRM $")')) acted = seen.add(`${label} daily double`);
       else if (await tap(p, 'button:has-text("TAP TO BUZZ IN!")')) acted = seen.add(`${label} buzz`);
       else if (await tap(p, 'button.border-2.border-amber-400')) acted = seen.add(`${label} answer`);
       else if (

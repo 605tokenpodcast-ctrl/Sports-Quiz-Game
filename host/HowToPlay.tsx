@@ -66,6 +66,20 @@ export default function HowToPlay() {
               </div>
 
               <div>
+                <strong className="text-amber-300">Football Scoring (on by default):</strong>
+                <p className="mt-0.5 text-slate-400">
+                  <strong>Pick-six:</strong> answer right after a rival missed the same clue and it pays <strong>1.5 times</strong>. <strong>Go for two:</strong> get a top-dollar tile right and you can take a harder follow-up about the same subject. Right doubles the tile, wrong gives it back. Turn it off on the start screen.
+                </p>
+              </div>
+
+              <div>
+                <strong className="text-amber-300">Category Draft (optional):</strong>
+                <p className="mt-0.5 text-slate-400">
+                  Turn it on at the start screen and each round deals 3 extra columns (2 in a Short Game). Before play, players take turns striking one, lowest score first, until a normal board is left.
+                </p>
+              </div>
+
+              <div>
                 <strong className="text-amber-300">4. Buzzer Timing:</strong>
                 <p className="mt-0.5 text-slate-400">
                   Wait for the host light to turn active. Buzz with Spacebar, Enter, screen button, or mobile gamepad!
