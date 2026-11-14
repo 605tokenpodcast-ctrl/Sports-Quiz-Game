@@ -10,6 +10,7 @@ import {QRCodeView, SeasonTable} from '../ui/shared';
 import type {ContestantId} from '../game/types';
 import {isOnFire, shownClueText, currentWorth, hintCount} from '../game/rules';
 import {useGame} from '../game/GameContext';
+import ReactionFloat from '../ui/ReactionFloat';
 
 const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString()}`;
 
@@ -29,7 +30,69 @@ function streamBackdrop(): StreamBackdrop {
   return bg === 'green' ? 'green' : bg === 'transparent' || bg === 'none' ? 'transparent' : 'normal';
 }
 
+/** `&view=strip`: only a scoreboard strip along the bottom, to lay over a camera shot. */
+const stripView = () =>
+  typeof window !== 'undefined' &&
+  (new URLSearchParams(window.location.search).get('view') || new URLSearchParams(window.location.hash.replace(/^#/, '')).get('view')) === 'strip';
+
 export default function StreamScreen() {
+  return stripView() ? <ScoreStrip /> : <FullStreamScreen />;
+}
+
+/**
+ * The scoreboard strip: names, scores, who buzzed and who has the board, plus the round and the
+ * clue in play, in one bar along the bottom. Use it as an OBS browser source over the camera
+ * (`&bg=transparent`) or key it out (`&bg=green`). It makes no sound.
+ */
+function ScoreStrip() {
+  const {gameState, currentRound, contestants, activeClue, activeSelector, activeContestantsList, reactions, roomCode} = useGame();
+  const [backdrop] = useState(streamBackdrop);
+  const keyColor = backdrop === 'green' ? CHROMA_GREEN : backdrop === 'transparent' ? 'transparent' : '#020617';
+  useEffect(() => {
+    document.documentElement.style.background = keyColor;
+    document.body.style.background = keyColor;
+  }, [keyColor]);
+  const playing = gameState.status === 'PLAYING';
+  const over = gameState.status === 'VICTORY' || gameState.status === 'GAME_OVER';
+  const round = !playing && !over ? 'NFL Trivia' : over ? 'Final scores' : currentRound === 'ROUND_1' ? 'Round 1' : currentRound === 'CHAMPIONSHIP' ? 'Round 2' : 'Final Showdown';
+  const leader = Math.max(...activeContestantsList.map((id) => contestants[id].score));
+  return (
+    <div className="fixed inset-0 flex flex-col justify-end text-white font-sans select-none" style={{background: keyColor}} data-view="strip">
+      <div className="relative flex items-stretch bg-slate-950/95 border-t-4 border-amber-500 h-[clamp(64px,14vh,120px)]">
+        <div className="shrink-0 flex flex-col justify-center px-[2vw] bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 min-w-[16vw]">
+          <div className="text-[clamp(0.8rem,2.4vh,1.4rem)] font-black uppercase leading-tight">{round}</div>
+          <div className="text-[clamp(0.6rem,1.6vh,1rem)] font-bold uppercase leading-tight truncate max-w-[22vw]">
+            {playing && activeClue ? `${activeClue.clue.category} · $${(activeClue.clue.value || 0).toLocaleString()}` : roomCode ? `Room ${roomCode}` : 'Sports Arena'}
+          </div>
+        </div>
+        {activeContestantsList.map((id) => {
+          const c = contestants[id];
+          const buzzed = activeClue?.buzzedContestantId === id && !(activeClue.isBonusWager && !activeClue.bonusWagerLocked);
+          const control = playing && activeSelector === id && !activeClue && currentRound !== 'FINAL_SHOWDOWN';
+          return (
+            <div
+              key={id}
+              data-seat={id}
+              className={`relative flex-1 min-w-0 flex items-center justify-between gap-2 px-[1.5vw] border-l border-slate-800 ${
+                buzzed ? 'bg-amber-500/30' : c.reaction === 'correct' ? 'bg-emerald-900/60' : c.reaction === 'wrong' ? 'bg-rose-900/60' : ''
+              }`}>
+              <ReactionFloat reactions={reactions} seat={id} size="clamp(1.5rem,5vh,3rem)" />
+              <div className="min-w-0 flex items-center gap-1.5 text-[clamp(0.9rem,3vh,1.8rem)] font-black uppercase">
+                {control && <Star className="w-[1em] h-[1em] fill-amber-400 text-amber-400 shrink-0" />}
+                {over && c.score === leader && <Trophy className="w-[1em] h-[1em] text-amber-400 shrink-0" />}
+                <span className="truncate">{c.name}</span>
+                {isOnFire(c) && <Flame className="w-[1em] h-[1em] fill-orange-500 text-orange-400 shrink-0" />}
+              </div>
+              <div className={`shrink-0 font-mono font-black text-[clamp(1.1rem,4vh,2.4rem)] ${c.score >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{money(c.score)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FullStreamScreen() {
   const game = useGame();
   const {
     roomCode,
@@ -513,11 +576,13 @@ function Results() {
 }
 
 function Podium({id}: {id: ContestantId}) {
-  const {contestants, activeClue, activeSelector, currentRound} = useGame();
+  const {contestants, activeClue, activeSelector, currentRound, reactions} = useGame();
   const c = contestants[id];
   const buzzed = activeClue?.buzzedContestantId === id && !(activeClue.isBonusWager && !activeClue.bonusWagerLocked);
   const control = activeSelector === id && !activeClue && currentRound !== 'FINAL_SHOWDOWN';
   return (
+    <div className="relative">
+    <ReactionFloat reactions={reactions} seat={id} />
     <div
       className={`w-[min(28vw,360px)] rounded-t-2xl border-2 overflow-hidden ${
         buzzed
@@ -544,6 +609,7 @@ function Podium({id}: {id: ContestantId}) {
       <div className={`pb-[clamp(0.15rem,1vh,0.75rem)] text-center font-mono font-black text-[clamp(1.25rem,4.4vh,2.25rem)] ${c.score >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
         {money(c.score)}
       </div>
+    </div>
     </div>
   );
 }

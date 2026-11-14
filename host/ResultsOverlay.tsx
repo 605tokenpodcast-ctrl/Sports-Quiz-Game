@@ -1,5 +1,5 @@
 // The end of game results.
-import {RotateCw, Trophy, Edit3, Share2} from 'lucide-react';
+import {RotateCw, Trophy, Edit3, Share2, FileText} from 'lucide-react';
 import {MenuOverlay} from '../utils/helper';
 import {AnswerFormat, TriviaTier} from '../utils/leaderboard';
 import {IMG_TROPHY, SeasonTable} from '../ui/shared';
@@ -22,6 +22,7 @@ export default function ResultsOverlay() {
     recapMomentsList,
     recapAwardsList,
     shareRecap,
+    exportShowNotes,
     seasonRows,
     episodeCode,
   } = useGame();
@@ -162,6 +163,14 @@ export default function ResultsOverlay() {
                 className="min-w-[48px] min-h-[44px] w-full py-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-slate-950 font-black text-xs sm:text-sm shadow-md transition-transform active:scale-95 flex items-center justify-center gap-2">
                 <Share2 className="w-4 h-4" />
                 <span>SHARE RECAP CARD</span>
+              </button>
+
+              <button
+                onClick={exportShowNotes}
+                data-show-notes
+                className="min-w-[48px] min-h-[44px] w-full py-2 rounded-full border border-emerald-500/70 bg-slate-950/70 hover:border-emerald-300 text-emerald-200 font-black text-xs sm:text-sm flex items-center justify-center gap-2">
+                <FileText className="w-4 h-4" />
+                <span>SHOW NOTES (every clue + stumper)</span>
               </button>
 
               {episodeCode && (

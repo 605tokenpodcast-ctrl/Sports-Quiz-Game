@@ -6,6 +6,7 @@ import {ContestantId, isOpenAnswerMode, seatLabel} from '../game/types';
 import {maxDailyDoubleWager, maxFinalWager, EARLY_BUZZ_LOCKOUT_MS, shownClueText, currentWorth, hintCount} from '../game/rules';
 import VoiceAnswerButton, {isVoiceSupported} from '../utils/VoiceAnswerButton';
 import {FinalChoices} from '../ui/shared';
+import {REACTION_EMOJI} from '../utils/reactions';
 import {useGame} from '../game/GameContext';
 
 export default function PhoneScreen() {
@@ -49,6 +50,7 @@ export default function PhoneScreen() {
     shareRecap,
     categoryIntro,
     sendClientBuzz,
+    sendReaction,
   } = useGame();
     const isPlayer2Selector = activeSelector === mySeat;
     const isPlayer2Buzzed = activeClue?.buzzedContestantId === mySeat;
@@ -581,6 +583,22 @@ export default function PhoneScreen() {
             </div>
           )}
         </main>
+
+        {/* Emoji reactions: they float up over this player's podium on the stream screen.
+            Hidden while this phone is answering, so a stray tap can't land on one. */}
+        {gameState.status !== 'START' && !isPlayer2Buzzed && !isDailyDoubleForMe && (
+          <div className="relative z-10 w-full mb-1.5 flex justify-center gap-2 short:hidden" aria-label="Reactions">
+            {REACTION_EMOJI.map((e) => (
+              <button
+                key={e}
+                onClick={() => sendReaction(e)}
+                aria-label={`React ${e}`}
+                className="min-w-[44px] min-h-[38px] rounded-full bg-slate-900/80 border border-slate-800 text-xl active:scale-90 transition-transform">
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Client Bottom Footer Standings */}
         <footer className="relative z-10 w-full bg-slate-900/90 border border-slate-800 rounded-xl p-2 flex items-center justify-around text-center">

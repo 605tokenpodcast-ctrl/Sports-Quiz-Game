@@ -28,6 +28,8 @@ import {useWakeLock} from '../utils/wakeLock';
 import {newEpisodeCode, normalizeEpisodeCode, episodeLength, seededRandom} from '../utils/episode';
 import {P2PConnectionManager, P2PMessage} from '../utils/p2pSync';
 import {exportHistory, mergeHistory} from '../utils/questionHistory';
+import {rememberStumper, showNotesMarkdown, stumperOf, stumperOfTheWeek, type LoggedClue} from '../utils/showNotes';
+import {isReactionEmoji, reactionGate, REACTION_SHOW_MS, type Reaction, type ReactionEmoji} from '../utils/reactions';
 import {clearSavedGame, loadSavedGame, saveGame, type SavedGame} from '../utils/savedGame';
 import {
   answerLine,
@@ -452,6 +454,16 @@ export function useGameController() {
   useEffect(() => {
     if (shownClueId) markQuestionsSeen([shownClueId]);
   }, [shownClueId]);
+  // The show notes log: a clue goes in when it is opened, and answers are added as they come.
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || !activeClue || clueLogRef.current.some((c) => c.id === activeClue.clue.id)) return;
+    const q = activeClue.clue;
+    clueLogRef.current.push({
+      id: q.id, round: currentRound === 'ROUND_1' ? 'ROUND_1' : 'ROUND_2', category: q.category, value: q.value,
+      clue: q.clue, answer: q.correctAnswer, right: [], wrong: [],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, shownClueId]);
   // Who the clue was about is remembered too. A phone only learns that with the reveal.
   const shownPeople = activeClue?.clue.people;
   useEffect(() => {
@@ -466,6 +478,11 @@ export function useGameController() {
   useEffect(() => {
     if (shownFinalId) markQuestionsSeen([shownFinalId]);
   }, [shownFinalId]);
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || !shownFinalId || !finalClue || clueLogRef.current.some((c) => c.id === finalClue.id)) return;
+    clueLogRef.current.push({id: finalClue.id, round: 'FINAL', category: finalClue.category, value: 0, clue: finalClue.clue, answer: finalClue.correctAnswer, right: [], wrong: []});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceRole, shownFinalId]);
   // Multiple choice games get choices in the Final too (empty for typed and mic-only games).
   const [finalOptions, setFinalOptions] = useState<string[]>([]);
 
@@ -515,7 +532,12 @@ export function useGameController() {
   const [mySeat, setMySeat] = useState<RemoteSeat>('player2');
   // Host: stream screens watching this game, by PeerJS id.
   const screenPeersRef = useRef(new Set<string>());
+  // Scoreboard strips watch too, but make no sound, so they don't count as stream screens.
+  const quietScreensRef = useRef(new Set<string>());
   const [screenCount, setScreenCount] = useState(0);
+  const [stripCount, setStripCount] = useState(0);
+  const isStripView =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'strip';
   // Stream screen: the podium lineup the host is showing.
   const [syncedLineup, setSyncedLineup] = useState<ContestantId[]>(['player', 'player2', 'analyst']);
   const player3Human = Object.values(remoteSeats).includes('analyst');
@@ -603,6 +625,37 @@ export function useGameController() {
     }, 2400);
   }, []);
 
+  // Every clue played this game and who got it, for the show notes (host only).
+  const clueLogRef = useRef<LoggedClue[]>([]);
+  const stumperSavedRef = useRef(false);
+
+  // Emoji reactions from the players, floated up on the stream screen (utils/reactions.ts).
+  const [reactions, setReactions] = useState<Reaction[]>([]);
+  const reactionOkRef = useRef(reactionGate());
+  const reactionIdRef = useRef(0);
+  const addReaction = useCallback((r: Reaction) => {
+    setReactions((prev) => [...prev.filter((x) => r.at - x.at < REACTION_SHOW_MS), r].slice(-24));
+    setTimeout(() => setReactions((prev) => prev.filter((x) => x.id !== r.id)), REACTION_SHOW_MS);
+  }, []);
+  /** Host: show a seat's reaction here and send it to every phone and screen. */
+  const showReaction = useCallback(
+    (emoji: ReactionEmoji, seat: string) => {
+      if (!reactionOkRef.current(seat)) return;
+      const id = ++reactionIdRef.current;
+      addReaction({id, emoji, seat, at: Date.now()});
+      p2pRef.current?.send({type: 'REACTION', emoji, seat, id});
+    },
+    [addReaction]
+  );
+  /** This device's player reacts: a phone asks the host, the host shows it for its own seat. */
+  const sendReaction = useCallback(
+    (emoji: ReactionEmoji) => {
+      if (deviceRole === 'HOST') showReaction(emoji, 'player');
+      else if (deviceRole !== 'SCREEN') p2pRef.current?.send({type: 'CLIENT_REACTION', emoji});
+    },
+    [deviceRole, showReaction]
+  );
+
   // Open Contestant Tag Editor Modal
   const openTagEditorModal = useCallback(() => {
     gameAudio.playCrispClick();
@@ -666,6 +719,7 @@ export function useGameController() {
   }, [roomCode]);
   const streamScreenUrl = shareableJoinUrl.replace(/role=join$/, 'role=screen');
   const greenScreenUrl = `${streamScreenUrl}&bg=green`;
+  const stripUrl = `${streamScreenUrl}&view=strip&bg=transparent`;
 
   // Sync SDK lifecycle score with player's cash bankroll
   useEffect(() => {
@@ -689,6 +743,8 @@ export function useGameController() {
   // Setup Board data with strict session-wide deduplication & Daily Doubles
   // (1 in Round 1, 2 in Round 2; a short game has half the clues, so just 1 in Round 2)
   const initializeBoards = useCallback(() => {
+    clueLogRef.current = [];
+    stumperSavedRef.current = false;
     // With an episode code every pick (columns, clues, Daily Doubles, the Final) comes from the code.
     const random = episodeCode ? seededRandom(`${episodeCode}|${bankInfo?.dataThrough ?? ''}`) : Math.random;
     const session = dealWith(episodeCode ? random : null, () => createFullGameSession(difficulty, gameLength));
@@ -1196,6 +1252,8 @@ export function useGameController() {
     );
 
     const name = contestantsRef.current[who]?.name || (how.kind === 'ai' ? 'Opponent' : 'Player');
+    const logged = clueLogRef.current.find((c) => c.id === prev.clue.id);
+    if (logged) (correct ? logged.right : logged.wrong).push(name);
     commitClue(resolveAnswer(prev, who, correct, how, {name, buzzerSeats, now: Date.now()}));
   };
   const applyAnswerRef = useRef(applyAnswer);
@@ -1222,7 +1280,12 @@ export function useGameController() {
       // 1. Host receives events from friends' phones
       if (deviceRole === 'HOST') {
         if (msg.type === 'SCREEN_JOIN') {
-          if (screenPeersRef.current.has(fromPeerId)) return;
+          if (screenPeersRef.current.has(fromPeerId) || quietScreensRef.current.has(fromPeerId)) return;
+          if (msg.quiet) {
+            quietScreensRef.current.add(fromPeerId);
+            setStripCount(quietScreensRef.current.size);
+            return;
+          }
           screenPeersRef.current.add(fromPeerId);
           setScreenCount(screenPeersRef.current.size);
           showToast('📺 Stream screen connected');
@@ -1323,6 +1386,10 @@ export function useGameController() {
         if (!seat) return;
 
         switch (msg.type) {
+          case 'CLIENT_REACTION':
+            if (isReactionEmoji(msg.emoji)) showReaction(msg.emoji, seat);
+            break;
+
           case 'CLIENT_BUZZ': {
             // Timed from when that phone showed the light, so the host's own player has no head start.
             const current = activeClueRef.current;
@@ -1397,6 +1464,10 @@ export function useGameController() {
       if (deviceRole !== 'HOST') {
         if (msg.type === 'QUESTION_HISTORY') {
           if (mergeHistory(msg.history)) setSeenCountRefresh((c) => c + 1);
+          return;
+        }
+        if (msg.type === 'REACTION') {
+          if (isReactionEmoji(msg.emoji)) addReaction({id: msg.id, emoji: msg.emoji, seat: msg.seat, at: Date.now()});
           return;
         }
         if (msg.type === 'JOIN_WAITING') {
@@ -1500,6 +1571,7 @@ export function useGameController() {
 
     const role = deviceRole === 'HOST' ? 'host' : 'client';
     screenPeersRef.current = new Set();
+    quietScreensRef.current = new Set();
     setScreenCount(0);
     const name = playerNameRef.current;
     const mgr = new P2PConnectionManager(
@@ -1518,6 +1590,10 @@ export function useGameController() {
           }
         },
         onPeerLeft: (peerId) => {
+          if (quietScreensRef.current.delete(peerId)) {
+            setStripCount(quietScreensRef.current.size);
+            return;
+          }
           if (screenPeersRef.current.delete(peerId)) {
             setScreenCount(screenPeersRef.current.size);
             showToast('📺 Stream screen disconnected');
@@ -1556,7 +1632,7 @@ export function useGameController() {
         },
       },
       name && name !== 'Champion' ? name : undefined,
-      deviceRole === 'SCREEN' ? 'screen' : 'player',
+      deviceRole === 'SCREEN' ? (isStripView ? 'strip' : 'screen') : 'player',
       deviceRole === 'HOST' && savedGameAtLoad()?.roomCode === roomCode
     );
 
@@ -1594,7 +1670,7 @@ export function useGameController() {
         season: seasonRows.slice(0, 8),
       },
     });
-  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS' && !finalReveal, remoteSeats, readAloud, voiceSpeed, gameLength, screenCount, seasonRows]);
+  }, [deviceRole, round1Board, round2Board, difficulty, answerMode, finalClue, finalOptions, finalShowdownPhase === 'RESULTS' && !finalReveal, remoteSeats, readAloud, voiceSpeed, gameLength, screenCount, stripCount, seasonRows]);
 
   useEffect(() => {
     if (deviceRole !== 'HOST' || !p2pRef.current) return;
@@ -1939,7 +2015,7 @@ export function useGameController() {
 
   // Reading aloud happens on one device: the stream screen if one is watching, otherwise the host.
   const speaksHere =
-    readAloud && isSpeechSupported && (deviceRole === 'SCREEN' || (deviceRole === 'HOST' && screenCount === 0));
+    readAloud && isSpeechSupported && ((deviceRole === 'SCREEN' && !isStripView) || (deviceRole === 'HOST' && screenCount === 0));
 
   // Host: once the clue has been read, the buzzers light up a moment later instead of waiting
   // out the estimated reading time.
@@ -2450,6 +2526,43 @@ export function useGameController() {
     }
   }, [activeContestantsList, contestants, recapMomentsList, recapAwardsList, difficulty, gameLength, answerMode, showToast]);
 
+  // The stumper of a finished game is kept for the week's pick, once per game.
+  useEffect(() => {
+    if (deviceRole !== 'HOST' || stumperSavedRef.current) return;
+    if (gameState.status !== 'VICTORY' && gameState.status !== 'GAME_OVER') return;
+    stumperSavedRef.current = true;
+    rememberStumper(stumperOf(clueLogRef.current));
+  }, [deviceRole, gameState.status]);
+
+  // Show notes: every clue, who got it, the scores and the stumpers, as Markdown. Copied and downloaded.
+  const exportShowNotes = useCallback(async () => {
+    const formats: Record<AnswerMode, string> = {STANDARD: '4-Choice', HARD: '8-Choice', EXPERT: 'Typed', VOICE: 'Mic Only'};
+    const level = difficulty.charAt(0) + difficulty.slice(1).toLowerCase();
+    const date = new Date();
+    const text = showNotesMarkdown({
+      date,
+      mode: `${gameLength === 'SHORT' ? 'Short' : 'Full'} Game · ${formats[answerMode]} · ${level}`,
+      standings: activeContestantsList.map((id) => contestants[id]).sort((a, b) => b.score - a.score).map((c) => ({name: c.name, score: c.score})),
+      log: clueLogRef.current,
+      weekStumper: stumperOfTheWeek(),
+      episodeCode: episodeCode || undefined,
+    });
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch {}
+    try {
+      const url = URL.createObjectURL(new Blob([text], {type: 'text/markdown'}));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `show-notes-${date.toISOString().slice(0, 10)}.md`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {}
+    showToast(copied ? '✓ Show notes copied and saved to your downloads' : '✓ Show notes saved to your downloads');
+  }, [activeContestantsList, contestants, difficulty, gameLength, answerMode, episodeCode, showToast]);
+
   // Copy Room Link to Clipboard
   const handleCopyInviteLink = useCallback(() => {
     navigator.clipboard
@@ -2612,6 +2725,10 @@ export function useGameController() {
     discardSavedGame,
     pendingJoins,
     answerJoinRequest,
+    reactions,
+    sendReaction,
+    stripUrl,
+    awaySeats,
     joinWaiting,
     mySeat,
     hostPlays,
@@ -2651,6 +2768,7 @@ export function useGameController() {
     recapMomentsList,
     recapAwardsList,
     shareRecap,
+    exportShowNotes,
     handleContestantBuzz,
     handleContestantSubmitAnswer,
     confirmFinalWagers,

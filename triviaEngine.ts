@@ -354,6 +354,8 @@ let COMPILED_CACHE: TriviaCategory[] | null = null;
 export interface ExternalBankInfo {
   questionCount: number;
   dataThrough: string;
+  /** When the bank was built (the weekly refresh), as an ISO date. */
+  generatedAt?: string;
 }
 
 /**
@@ -372,7 +374,7 @@ export async function loadExternalQuestionBank(url = 'questions/nfl.json', attem
           if (!known.has(c.id)) EXTERNAL_SPECS.push(c);
         }
         COMPILED_CACHE = null;
-        return { questionCount: bank.questionCount, dataThrough: bank.dataThrough };
+        return { questionCount: bank.questionCount, dataThrough: bank.dataThrough, generatedAt: bank.generatedAt };
       }
     } catch (e) {}
     if (attempt < attempts) await new Promise((r) => setTimeout(r, 1000 * attempt));

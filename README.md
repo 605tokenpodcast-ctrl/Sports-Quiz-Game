@@ -127,6 +127,25 @@ honks a horn, P3 (or Stats Riley) chirps and Coach Dave blows a whistle.
 
 After the game, **Share Recap Card** makes a 1080 x 1350 image with the final standings and
 best moments, for social posts. Phones open the share sheet; computers download it.
+**Show Notes** (also on the results) copies and downloads a Markdown file with every clue that
+was played, who got it and who missed it, the final scores, the **Stumper of the game** (the
+priciest clue nobody got) and the **Stumper of the week** (the priciest one this device has seen
+go unanswered in the last 7 days), ready to paste into podcast notes.
+
+**Scoreboard strip:** Invite Phones also has a **Scoreboard Strip** link (`&view=strip`). It is a
+thin bar with each player's name and score and the current clue, on a see-through background, to
+lay over a video call or camera shot in OBS. It makes no sound and isn't counted as a stream screen.
+
+**Reactions:** players can tap 👏 🔥 😂 😱 🏈 on their phones between buzzes. The emoji floats up over
+their podium on the stream screen and the strip (one every second or so per player).
+
+**Pre-show check** (on the start screen) checks the things that go wrong on air: whether the
+questions are loaded and fresh, each phone's ping, whether a stream screen is connected, and buttons
+to test the read-aloud voice and the buzzer sounds.
+
+**Daily Drive** (on the start screen) is five solo questions a day, one per level, the same for
+everyone that day. The result shows a streak and a Share button with green and red squares and no
+answers, plus a link (`?daily=1`) that opens that day's drive.
 
 ## Game show touches
 

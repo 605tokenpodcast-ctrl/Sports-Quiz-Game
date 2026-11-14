@@ -1,5 +1,5 @@
 // The start screen: game settings and the button to start.
-import {Play, HelpCircle, Trophy, Users, Shield, User, Smartphone, Edit3, Megaphone} from 'lucide-react';
+import {ClipboardCheck, Play, HelpCircle, Trophy, Users, Shield, User, Smartphone, Edit3, Megaphone} from 'lucide-react';
 import {gameAudio, MenuOverlay} from '../utils/helper';
 import {AIDifficulty, AnswerMode, RemoteSeat, seatLabel} from '../game/types';
 import {isVoiceSupported} from '../utils/VoiceAnswerButton';
@@ -9,6 +9,9 @@ import {savedGameSummary} from '../utils/savedGame';
 import VoiceSettings from './VoiceSettings';
 import FlaggedQuestions from './FlaggedQuestions';
 import CustomColumn from './CustomColumn';
+import PreShowCheck from './PreShowCheck';
+import DailyDrive from './DailyDrive';
+import {useState} from 'react';
 
 export default function StartMenu() {
   const {
@@ -53,6 +56,9 @@ export default function StartMenu() {
     resumeSavedGame,
     discardSavedGame,
   } = useGame();
+  const [preShowOpen, setPreShowOpen] = useState(false);
+  // ?daily=1 (the link in a shared Daily Drive result) opens today's drive once the questions are in.
+  const [dailyOpen, setDailyOpen] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('daily') === '1');
   const seatedPhones = Object.keys(remoteSeats).length;
   // With the host not playing, P1 and P2 need phones before the game can start (Stats Riley can be P3).
   const needsPhones = !hostPlays && seatedPhones < 2;
@@ -270,6 +276,16 @@ export default function StartMenu() {
 
             <CustomColumn />
 
+            <button
+              onClick={() => {
+                gameAudio.playCrispClick();
+                setPreShowOpen(true);
+              }}
+              className="w-full mb-3 min-h-[40px] flex items-center justify-center gap-1.5 rounded-lg border border-slate-600 bg-slate-950/80 text-xs font-bold text-slate-200 hover:border-amber-500">
+              <ClipboardCheck className="w-3.5 h-3.5 text-amber-400" /> Pre-show check
+            </button>
+            {preShowOpen && <PreShowCheck onClose={() => setPreShowOpen(false)} />}
+
             {/* Episode code: the same boards on any device, so listeners can play the show's game */}
             <div className="w-full mb-3 text-left">
               <label htmlFor="episode-code" className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-1">
@@ -389,6 +405,18 @@ export default function StartMenu() {
                 Check your connection, then tap to try again
               </button>
             )}
+
+            {/* Daily Drive: five questions a day, solo, the same for everyone */}
+            <button
+              onClick={() => {
+                gameAudio.playCrispClick();
+                setDailyOpen(true);
+              }}
+              disabled={bankStatus !== 'ready'}
+              className="w-full mb-3 min-h-[44px] flex items-center justify-center gap-2 rounded-xl border border-blue-500/70 bg-blue-950/60 text-sm font-black text-blue-100 hover:border-amber-400 disabled:opacity-50">
+              📅 Daily Drive <span className="text-[11px] font-normal text-blue-200">5 questions, same for everyone today</span>
+            </button>
+            {dailyOpen && bankStatus === 'ready' && <DailyDrive onClose={() => setDailyOpen(false)} />}
 
             {/* Secondary Buttons: Leaderboards, Phone Duel, Rules */}
             <div className="flex flex-wrap items-center justify-center gap-3">

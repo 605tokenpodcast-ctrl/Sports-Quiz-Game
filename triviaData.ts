@@ -30,7 +30,9 @@ import {
   sanitizeQuestionClue,
   QuestionClue,
   TriviaCategory,
+  categoryFamily,
 } from './triviaEngine';
+import {seededRandom} from './utils/episode';
 
 // Hand-written Final Showdown questions. Hard questions from the main bank join them at game time.
 const RAW_FINAL_SHOWDOWN_QUESTIONS: QuestionClue[] = [
@@ -227,6 +229,43 @@ export function getCategoriesForRound(
     gameLength,
     CURRENT_CATEGORY_IDS[round]
   );
+}
+
+/**
+ * The Daily Drive's five clues for a day: one each at levels 1 to 5, from five different
+ * columns, never about the same person twice. The same day gives the same five on every
+ * device with the same week's questions. The host's own column is left out (only this device
+ * has it), and the current columns too, since they change on Tuesday mid-week.
+ */
+export function dailyDriveClues(day: string): QuestionClue[] {
+  const random = seededRandom(`daily-drive|${day}`);
+  const skip = new Set<string>([...Object.values(CURRENT_CATEGORY_IDS), 'nfl_custom_column', 'nfl_waiver_wire']);
+  const cats = getActiveCategories()
+    .filter((c) => !skip.has(c.id))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  // Shuffle the columns with the day's numbers.
+  for (let i = cats.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [cats[i], cats[j]] = [cats[j], cats[i]];
+  }
+  const used = new Set<string>();
+  const usedFamilies = new Set<string>();
+  const out: QuestionClue[] = [];
+  for (let level = 1; level <= 5; level++) {
+    for (const cat of cats) {
+      if (usedFamilies.has(categoryFamily(cat.id))) continue;
+      const pool = cat.clues
+        .filter((q) => q.difficulty === level && !clueOverlaps(q, used))
+        .sort((a, b) => a.id.localeCompare(b.id));
+      if (!pool.length) continue;
+      const q = pool[Math.floor(random() * pool.length)];
+      out.push({...q, value: level * 200});
+      markClueUsed(q, used);
+      usedFamilies.add(categoryFamily(cat.id));
+      break;
+    }
+  }
+  return out;
 }
 
 /**
